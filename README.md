@@ -20,9 +20,9 @@ pnpm add eslint-plugin-sprinkles-lint
 ```js
 // .eslintrc.js
 module.exports = {
-  plugins: ["vanilla-extract"],
+  plugins: ["sprinkles-lint"],
   rules: {
-    "vanilla-extract/no-use-style-declared-sprinkles": "error",
+    "sprinkles-lint/no-use-style-declared-sprinkles": "error",
   },
 };
 ```
