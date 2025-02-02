@@ -1,4 +1,4 @@
-import noUseStyleDeclaredSprinkles from "./rules/no-use-style-declared-sprinkles.js";
+const noUseStyleDeclaredSprinkles = require("./rules/no-use-style-declared-sprinkles.js");
 
 export default {
   rules: {
