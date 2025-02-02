@@ -168,7 +168,7 @@ module.exports = {
                   if (sprinklesConfig[propName]) {
                     const valueText = sourceCode.getText(propValue);
                     const cleanValue = valueText.replace(/['"]/g, "");
-                    if (sprinklesConfig[propName].includes(cleanValue)) {
+                    if (isAllowedValue(propName, cleanValue)) {
                       sprinklesProps[propName] = valueText;
                     } else {
                       remainingProps[propName] = valueText;
