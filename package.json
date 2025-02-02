@@ -3,13 +3,14 @@
   "version": "1.0.0",
   "description": "eslint plugin for using already declared sprinkles",
   "main": "index.js",
+  "type": "module",
   "scripts": {
-    "build": "tsup",
-    "dev": "tsup --watch"
+    "lint": "eslint .",
+    "test": "node src/tests/sprinkles-rules.test.js"
   },
   "author": "Sangminnn",
   "license": "ISC",
-  "devDependencies": {
-    "tsup": "^8.3.6"
+  "dependencies": {
+    "eslint": "^9.19.0"
   }
 }
