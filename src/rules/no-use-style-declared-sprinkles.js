@@ -1,3 +1,5 @@
+const path = require("path");
+
 // src/rules/no-use-style-declared-sprinkles.js
 module.exports = {
   meta: {
@@ -45,7 +47,13 @@ module.exports = {
 
   create(context) {
     const options = context.options[0] || {};
-    const sprinklesConfig = options.sprinklesConfig;
+
+    const configPath = options.configPath;
+
+    // configPath가 있으면 파일에서 설정을 불러옴
+    const sprinklesConfig = configPath
+      ? require(path.resolve(process.cwd(), configPath))
+      : options.sprinklesConfig;
 
     // 변수는 제외해야하기때문에 확인
     const isVariable = (node) => {
@@ -54,6 +62,23 @@ module.exports = {
         node.type === "CallExpression" ||
         node.type === "MemberExpression"
       );
+    };
+
+    // 값이 허용된 것인지 확인하는 함수 추가
+    const isAllowedValue = (propName, value) => {
+      const configValue = sprinklesConfig[propName];
+
+      // 배열인 경우
+      if (Array.isArray(configValue)) {
+        return configValue.includes(value);
+      }
+
+      // 객체인 경우 (예: flex)
+      if (typeof configValue === "object" && configValue !== null) {
+        return Object.values(configValue).includes(value);
+      }
+
+      return false;
     };
 
     return {
@@ -81,7 +106,7 @@ module.exports = {
               if (sprinklesConfig[propName]) {
                 const valueText = sourceCode.getText(propValue);
                 const cleanValue = valueText.replace(/['"]/g, "");
-                if (sprinklesConfig[propName].includes(cleanValue)) {
+                if (isAllowedValue(propName, cleanValue)) {
                   sprinklesProps[propName] = valueText;
                 } else {
                   remainingProps[propName] = valueText;
