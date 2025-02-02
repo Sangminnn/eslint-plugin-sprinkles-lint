@@ -1,6 +1,6 @@
 {
   "name": "eslint-plugin-sprinkles-lint",
-  "version": "1.0.12",
+  "version": "1.1.0",
   "description": "eslint plugin for using already declared sprinkles",
   "main": "src/index.js",
   "files": [
