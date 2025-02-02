@@ -1,6 +1,6 @@
 const noUseStyleDeclaredSprinkles = require("./rules/no-use-style-declared-sprinkles.js");
 
-export default {
+module.exports = {
   rules: {
     "no-use-style-declared-sprinkles": noUseStyleDeclaredSprinkles,
   },

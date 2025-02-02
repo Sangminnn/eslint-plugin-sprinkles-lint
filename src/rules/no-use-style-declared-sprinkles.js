@@ -1,3 +1,4 @@
+// src/rules/no-use-style-declared-sprinkles.js
 module.exports = {
   meta: {
     type: "problem",
@@ -12,9 +13,20 @@ module.exports = {
           sprinklesConfig: {
             type: "object",
             additionalProperties: {
-              // ✅ properties 밖으로 이동
-              type: "array",
-              items: { type: "string" },
+              oneOf: [
+                {
+                  type: "array",
+                  items: {
+                    oneOf: [{ type: "string" }, { type: "number" }],
+                  },
+                },
+                {
+                  type: "object",
+                  additionalProperties: {
+                    type: "string",
+                  },
+                },
+              ],
             },
           },
           configPath: {
@@ -35,6 +47,15 @@ module.exports = {
     const options = context.options[0] || {};
     const sprinklesConfig = options.sprinklesConfig;
 
+    // 변수는 제외해야하기때문에 확인
+    const isVariable = (node) => {
+      return (
+        node.type === "Identifier" ||
+        node.type === "CallExpression" ||
+        node.type === "MemberExpression"
+      );
+    };
+
     return {
       CallExpression(node) {
         if (node.callee.name === "style") {
@@ -48,12 +69,25 @@ module.exports = {
 
             firstArg.properties.forEach((prop) => {
               const propName = prop.key.name;
-              const propValue = sourceCode.getText(prop.value);
+              const propValue = prop.value;
 
+              // 값이 변수인 경우 무시
+              if (isVariable(propValue)) {
+                remainingProps[propName] = sourceCode.getText(propValue);
+                return;
+              }
+
+              // 문자열이나 숫자 값인 경우만 체크
               if (sprinklesConfig[propName]) {
-                sprinklesProps[propName] = propValue;
+                const valueText = sourceCode.getText(propValue);
+                const cleanValue = valueText.replace(/['"]/g, "");
+                if (sprinklesConfig[propName].includes(cleanValue)) {
+                  sprinklesProps[propName] = valueText;
+                } else {
+                  remainingProps[propName] = valueText;
+                }
               } else {
-                remainingProps[propName] = propValue;
+                remainingProps[propName] = sourceCode.getText(propValue);
               }
             });
 
@@ -79,7 +113,6 @@ module.exports = {
                       }`
                     : "";
 
-                  // style({}) -> style([sprinkles({}), {}])
                   const newCode = `[${[sprinklesObj, remainingObj]
                     .filter(Boolean)
                     .join(",\n")}]`;
@@ -98,12 +131,25 @@ module.exports = {
 
                 element.properties.forEach((prop) => {
                   const propName = prop.key.name;
-                  const propValue = sourceCode.getText(prop.value);
+                  const propValue = prop.value;
 
+                  // 값이 변수인 경우 무시
+                  if (isVariable(propValue)) {
+                    remainingProps[propName] = sourceCode.getText(propValue);
+                    return;
+                  }
+
+                  // 문자열이나 숫자 값인 경우만 체크
                   if (sprinklesConfig[propName]) {
-                    sprinklesProps[propName] = propValue;
+                    const valueText = sourceCode.getText(propValue);
+                    const cleanValue = valueText.replace(/['"]/g, "");
+                    if (sprinklesConfig[propName].includes(cleanValue)) {
+                      sprinklesProps[propName] = valueText;
+                    } else {
+                      remainingProps[propName] = valueText;
+                    }
                   } else {
-                    remainingProps[propName] = propValue;
+                    remainingProps[propName] = sourceCode.getText(propValue);
                   }
                 });
 
