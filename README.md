@@ -5,7 +5,14 @@ Vanilla Extract의 Sprinkles를 사용할 때 이미 선언된 Sprinkles를 사�
 ## 설치
 
 ```bash
-npm install eslint-plugin-vanilla-extract-sprinkles
+// npm
+npm install eslint-plugin-sprinkles-lint
+
+// yarn
+yarn add eslint-plugin-sprinkles-lint
+
+// pnpm
+pnpm add eslint-plugin-sprinkles-lint
 ```
 
 ## 사용
