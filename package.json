@@ -4,13 +4,32 @@
   "description": "eslint plugin for using already declared sprinkles",
   "main": "index.js",
   "type": "module",
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "lint": "eslint .",
     "test": "node src/tests/sprinkles-rules.test.js"
   },
+  "keywords": [
+    "eslint",
+    "plugin",
+    "vanilla-extract",
+    "sprinkles",
+    "lint"
+  ],
   "author": "Sangminnn",
   "license": "ISC",
   "dependencies": {
-    "eslint": "^9.19.0"
+    "eslint": "^8.0.0"
+  },
+  "peerDependencies": {
+    "eslint": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Sangminnn/eslint-plugin-sprinkles-lint.git"
   }
 }
