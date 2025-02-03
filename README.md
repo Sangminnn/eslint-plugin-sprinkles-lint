@@ -6,32 +6,44 @@ This Plugin does not support ESLint Flat Config yet.
 
 if you use this plugin, i recommend this way.
 
-```
-// package.json
-"get-sprinkles-config": "ts-node scripts/exportSprinklesConfig.ts",
+### STEP 1. Export sprinkles.config.js to .eslintrc.sprinkles.js
 
+```
 // scripts/exportSprinklesConfig.js
+
 const fs = require('fs');
 const path = require('path');
 
 async function exportConfig() {
   // dynamic import for your sprinkles.config.js
-  const { sprinklesProperties } = await import(`${your sprinkles.config.js path}`);
+  const { sprinklesProperties } = await import(`${YOUR_SPRINKLES_CONFIG_PATH}`);
 
   fs.writeFileSync(
-    path.resolve(__dirname, '../.eslintrc.sprinkles.js'),
+    path.resolve(__dirname, `${YOUR_CONFIG_FILE_PATH}`),
     `module.exports = ${JSON.stringify(sprinklesProperties, null, 2)};`,
   );
 }
 
 exportConfig().catch(console.error);
+```
 
-// then you can get .eslintrc.sprinkles.js file
+### STEP 2. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js
+
+```
+// package.json
+
+"get-sprinkles-config": "ts-node scripts/exportSprinklesConfig.ts",
+```
+
+### STEP 3. Add rule to your .eslintrc.js
+
+```
+// .eslintrc.js
 
 "sprinkles-lint/no-use-style-declared-sprinkles": [
   "error",
   {
-    "configPath": "./.eslintrc.sprinkles.js"
+    "configPath": `${YOUR_CONFIG_FILE_PATH}`
   }
 ]
 ```
