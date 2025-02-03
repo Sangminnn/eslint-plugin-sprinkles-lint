@@ -16,7 +16,7 @@ const path = require('path');
 
 async function exportConfig() {
   // dynamic import for your sprinkles.config.js
-  const { sprinklesProperties } = await import('your sprinkles.config.js path');
+  const { sprinklesProperties } = await import(`${your sprinkles.config.js path}`);
 
   fs.writeFileSync(
     path.resolve(__dirname, '../.eslintrc.sprinkles.js'),
@@ -63,9 +63,13 @@ module.exports = {
 
 ## Example
 
+### Default Setting
+
 ```js
 // sprinkles.config.js
 module.exports = {
+  marginTop: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+  cursor: ["pointer"],
   // can use array
   backgroundColor: ["red", "blue", "green"],
 
@@ -74,24 +78,69 @@ module.exports = {
     1: "1 1 0%",
   },
 };
+```
 
-// ✅
-const style = sprinkles({
+### Case 1 - Default case (using style only)
+
+```
+// as-is
+const testStyle = style({
   backgroundColor: "red",
 });
 
-// ✅
-const style2 = style([
+// to-be
+const testStyle = sprinkles({
+  backgroundColor: "red",
+});
+```
+
+### Case 2 - Using style with sprinkles in array
+
+```js
+// as-is
+const testStyle = style([
   sprinkles({
     backgroundColor: "red",
+    marginTop: 5,
+  }),
+  {
+    marginTop: 1,
+    display: "flex",
+  },
+]);
+
+// to-be
+const testStyle = style([
+  sprinkles({
+    backgroundColor: "red",
+    marginTop: 1, // you can also remove duplicated property
   }),
   {
     display: "flex",
   },
 ]);
+```
 
-// ❌
-const style3 = style({
+### Case 3 - Using style with sprinkles in array, but actually doesn't need style object
+
+```js
+// as-is
+const testStyle = style([
+  sprinkles({
+    cursor: "pointer",
+  }),
+  {
+    backgroundColor: "red", // already defined in sprinkles
+    marginTop: 1, // already defined in sprinkles
+  },
+]);
+
+// to-be
+
+// remove style object and use sprinkles only
+const testStyle = sprinkles({
+  cursor: "pointer",
   backgroundColor: "red",
+  marginTop: 1,
 });
 ```
