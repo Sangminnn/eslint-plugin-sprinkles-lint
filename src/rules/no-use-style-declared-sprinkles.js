@@ -51,7 +51,6 @@ module.exports = {
       ? require(path.resolve(process.cwd(), configPath))
       : options.sprinklesConfig;
 
-    // 변수인지 확인
     const isVariable = (node) => {
       return (
         node.type === "Identifier" ||
@@ -60,24 +59,24 @@ module.exports = {
       );
     };
 
-    // 셀렉터인지 확인
     const isSelector = (propName) => {
       return propName.startsWith(":") || propName.startsWith("&");
     };
 
-    // 객체에 셀렉터가 포함되어 있는지 확인
     const hasSelectors = (properties) => {
       return properties.some((prop) =>
         isSelector(prop.key.name || prop.key.value)
       );
     };
 
-    // 값이 허용된 것인지 확인
     const isAllowedValue = (propName, value) => {
       const configValue = sprinklesConfig[propName];
 
       if (Array.isArray(configValue)) {
-        return configValue.includes(value);
+        // 숫자와 문자열 모두 체크
+        return (
+          configValue.includes(Number(value)) || configValue.includes(value)
+        );
       }
 
       if (typeof configValue === "object" && configValue !== null) {
@@ -93,9 +92,8 @@ module.exports = {
           const sourceCode = context.getSourceCode();
           const firstArg = node.arguments[0];
 
-          // 객체 직접 전달 케이스 (style({}))
+          // 객체 케이스
           if (firstArg.type === "ObjectExpression") {
-            // 셀렉터가 있는 경우
             if (hasSelectors(firstArg.properties)) {
               const remainingProps = {};
               firstArg.properties.forEach((prop) => {
@@ -103,7 +101,6 @@ module.exports = {
                 remainingProps[propName] = sourceCode.getText(prop.value);
               });
 
-              // sprinkles로 변환 가능한 속성 확인
               const sprinklesProps = {};
               Object.entries(remainingProps).forEach(([key, value]) => {
                 if (
@@ -130,25 +127,27 @@ module.exports = {
                     const sprinklesObj = `sprinkles({
                       ${Object.entries(sprinklesProps)
                         .map(([key, value]) => `${key}: ${value}`)
-                        .join(",\n")}
+                        .join(",\n    ")}
                     })`;
 
                     const remainingObj = `{
                       ${Object.entries(remainingProps)
-                        .map(([key, value]) => `${key}: ${value}`)
-                        .join(",\n")}
+                        .map(
+                          ([key, value]) =>
+                            `${isSelector(key) ? `'${key}'` : key}: ${value}`
+                        )
+                        .join(",\n    ")}
                     }`;
 
                     const newCode = `[${[sprinklesObj, remainingObj]
                       .filter(Boolean)
-                      .join(",\n")}]`;
+                      .join(",\n  ")}]`;
 
                     return fixer.replaceText(firstArg, newCode);
                   },
                 });
               }
             } else {
-              // 셀렉터가 없는 일반적인 케이스
               const sprinklesProps = {};
               const remainingProps = {};
 
@@ -185,35 +184,40 @@ module.exports = {
                     const sprinklesObj = `sprinkles({
                       ${Object.entries(sprinklesProps)
                         .map(([key, value]) => `${key}: ${value}`)
-                        .join(",\n")}
+                        .join(",\n    ")}
                     })`;
 
                     const remainingObj = Object.keys(remainingProps).length
                       ? `{
-                          ${Object.entries(remainingProps)
-                            .map(([key, value]) => `${key}: ${value}`)
-                            .join(",\n")}
-                        }`
+                        ${Object.entries(remainingProps)
+                          .map(([key, value]) => `${key}: ${value}`)
+                          .join(",\n    ")}
+                      }`
                       : "";
 
                     const newCode = `[${[sprinklesObj, remainingObj]
                       .filter(Boolean)
-                      .join(",\n")}]`;
+                      .join(",\n  ")}]`;
 
                     return fixer.replaceText(firstArg, newCode);
                   },
                 });
               }
             }
-          }
-          // 배열 전달 케이스 (style([{}]))
-          else if (firstArg.type === "ArrayExpression") {
+            // 배열 케이스
+          } else if (firstArg.type === "ArrayExpression") {
             firstArg.elements?.forEach((element) => {
               if (element.type === "ObjectExpression") {
                 if (hasSelectors(element.properties)) {
-                  // 셀렉터가 있는 경우는 그대로 둠
                   return;
                 }
+
+                // 기존에 Array형태에서 sprinkles 호출이 있는 경우
+                const existingSprinklesCalls = firstArg.elements.filter(
+                  (el) =>
+                    el.type === "CallExpression" &&
+                    el.callee.name === "sprinkles"
+                );
 
                 const sprinklesProps = {};
                 const remainingProps = {};
@@ -248,25 +252,127 @@ module.exports = {
                       property: Object.keys(sprinklesProps).join(", "),
                     },
                     fix(fixer) {
-                      const sprinklesObj = `sprinkles({
-                        ${Object.entries(sprinklesProps)
-                          .map(([key, value]) => `${key}: ${value}`)
-                          .join(",\n")}
-                      })`;
+                      if (existingSprinklesCalls.length > 0) {
+                        
+                        // 기존 sprinkles가 있는 경우
+                        const existingSprinklesProps = existingSprinklesCalls
+                          .map((call) => {
+                            const props = sourceCode.getText(call.arguments[0]);
+                            // 중괄호, 마지막 콤마 제거
+                            return props
+                              .slice(1, -1)
+                              .trim()
+                              .replace(/,\s*$/, "");
+                          })
+                          .filter(Boolean)
+                          .join(",\n    ");
 
-                      const remainingObj = Object.keys(remainingProps).length
-                        ? `{
+                        const mergedSprinklesObj = `sprinkles({
+                          ${existingSprinklesProps}${
+                            existingSprinklesProps ? "," : ""
+                          }
+                          ${Object.entries(sprinklesProps)
+                            .map(([key, value]) => `${key}: ${value}`)
+                            .join(",\n    ")}
+                        })`;
+
+                        // 1. 기존 요소들 (flexCenter 등)
+                        const existingElements = firstArg.elements
+                          .filter(
+                            (el) =>
+                              !(
+                                el.type === "CallExpression" &&
+                                el.callee.name === "sprinkles"
+                              ) && // sprinkles가 아니고
+                              el !== element // 현재 처리중인 요소도 아닌 것
+                          )
+                          .map((el) => sourceCode.getText(el));
+
+                        // 2. 남은 스타일 객체
+                        fix(fixer) {
+                          if (existingSprinklesCalls.length > 0) {
+                            // Map을 사용하여 중복 속성 관리
+                            const sprinklesPropsMap = new Map();
+                            const remainingPropsMap = new Map();
+                        
+                            // 기존 sprinkles 속성들 Map에 추가
+                            existingSprinklesCalls.forEach((call) => {
+                              const props = sourceCode.getText(call.arguments[0]);
+                              const propsText = props.slice(1, -1).trim();
+                              const propPairs = propsText.split(',').map(pair => pair.trim());
+                              propPairs.forEach(pair => {
+                                if (pair) {
+                                  const [key, value] = pair.split(':').map(part => part.trim());
+                                  sprinklesPropsMap.set(key, value);
+                                }
+                              });
+                            });
+                        
+                            // 새로운 속성들을 sprinkles와 remaining으로 분류
+                            Object.entries(sprinklesProps).forEach(([key, value]) => {
+                              sprinklesPropsMap.set(key, value);
+                            });
+                        
+                            Object.entries(remainingProps).forEach(([key, value]) => {
+                              remainingPropsMap.set(key, value);
+                            });
+                        
+                            const mergedSprinklesObj = `sprinkles({
+                            ${Array.from(sprinklesPropsMap.entries())
+                              .map(([key, value]) => `${key}: ${value}`)
+                              .join(',\n    ')}
+                          })`;
+                        
+                            // 1. 기존 요소들 (flexCenter 등)
+                            const existingElements = firstArg.elements
+                              .filter(el => 
+                                !(el.type === "CallExpression" && el.callee.name === "sprinkles") && 
+                                el !== element
+                              )
+                              .map(el => sourceCode.getText(el));
+                        
+                            // 2. 남은 스타일 객체
+                            const remainingObj = remainingPropsMap.size > 0
+                              ? `{
+                            ${Array.from(remainingPropsMap.entries())
+                              .map(([key, value]) => `${key}: ${value}`)
+                              .join(",\n    ")}
+                          }`
+                              : "";
+                        
+                            // 순서대로 배열 구성
+                            const newElements = [
+                              ...existingElements,
+                              mergedSprinklesObj,
+                              ...(remainingObj ? [remainingObj] : [])
+                            ];
+                        
+                            return fixer.replaceText(
+                              firstArg,
+                              `[${newElements.join(",\n  ")}]`
+                            );
+                          } else {
+                        // 기존 sprinkles가 없는 경우 (기존 로직)
+                        const sprinklesObj = `sprinkles({
+                          ${Object.entries(sprinklesProps)
+                            .map(([key, value]) => `${key}: ${value}`)
+                            .join(",\n    ")}
+                        })`;
+
+                        const remainingObj = Object.keys(remainingProps).length
+                          ? `{
                             ${Object.entries(remainingProps)
                               .map(([key, value]) => `${key}: ${value}`)
-                              .join(",\n")}
+                              .join(",\n    ")}
                           }`
-                        : "";
+                          : "";
 
-                      const newCode = [sprinklesObj, remainingObj]
-                        .filter(Boolean)
-                        .join(",\n");
+                        const newCode = [sprinklesObj, remainingObj]
+                          .filter(Boolean)
+                          .join(",\n  ");
 
-                      return fixer.replaceText(element, newCode);
+                        return fixer.replaceText(element, newCode);
+                      }
                     },
                   });
                 }
