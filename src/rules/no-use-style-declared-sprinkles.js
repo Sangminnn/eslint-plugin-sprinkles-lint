@@ -1,6 +1,5 @@
 const path = require("path");
 
-// src/rules/no-use-style-declared-sprinkles.js
 module.exports = {
   meta: {
     type: "problem",
@@ -47,15 +46,12 @@ module.exports = {
 
   create(context) {
     const options = context.options[0] || {};
-
     const configPath = options.configPath;
-
-    // configPath가 있으면 파일에서 설정을 불러옴
     const sprinklesConfig = configPath
       ? require(path.resolve(process.cwd(), configPath))
       : options.sprinklesConfig;
 
-    // 변수는 제외해야하기때문에 확인
+    // 변수인지 확인
     const isVariable = (node) => {
       return (
         node.type === "Identifier" ||
@@ -64,16 +60,26 @@ module.exports = {
       );
     };
 
-    // 값이 허용된 것인지 확인하는 함수 추가
+    // 셀렉터인지 확인
+    const isSelector = (propName) => {
+      return propName.startsWith(":") || propName.startsWith("&");
+    };
+
+    // 객체에 셀렉터가 포함되어 있는지 확인
+    const hasSelectors = (properties) => {
+      return properties.some((prop) =>
+        isSelector(prop.key.name || prop.key.value)
+      );
+    };
+
+    // 값이 허용된 것인지 확인
     const isAllowedValue = (propName, value) => {
       const configValue = sprinklesConfig[propName];
 
-      // 배열인 경우
       if (Array.isArray(configValue)) {
         return configValue.includes(value);
       }
 
-      // 객체인 경우 (예: flex)
       if (typeof configValue === "object" && configValue !== null) {
         return Object.values(configValue).includes(value);
       }
@@ -89,68 +95,126 @@ module.exports = {
 
           // 객체 직접 전달 케이스 (style({}))
           if (firstArg.type === "ObjectExpression") {
-            const sprinklesProps = {};
-            const remainingProps = {};
-
-            firstArg.properties.forEach((prop) => {
-              const propName = prop.key.name;
-              const propValue = prop.value;
-
-              // 값이 변수인 경우 무시
-              if (isVariable(propValue)) {
-                remainingProps[propName] = sourceCode.getText(propValue);
-                return;
-              }
-
-              // 문자열이나 숫자 값인 경우만 체크
-              if (sprinklesConfig[propName]) {
-                const valueText = sourceCode.getText(propValue);
-                const cleanValue = valueText.replace(/['"]/g, "");
-                if (isAllowedValue(propName, cleanValue)) {
-                  sprinklesProps[propName] = valueText;
-                } else {
-                  remainingProps[propName] = valueText;
-                }
-              } else {
-                remainingProps[propName] = sourceCode.getText(propValue);
-              }
-            });
-
-            if (Object.keys(sprinklesProps).length > 0) {
-              context.report({
-                node: firstArg,
-                messageId: "useSprinkles",
-                data: {
-                  property: Object.keys(sprinklesProps).join(", "),
-                },
-                fix(fixer) {
-                  const sprinklesObj = `sprinkles({
-                    ${Object.entries(sprinklesProps)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(",\n")}
-                  })`;
-
-                  const remainingObj = Object.keys(remainingProps).length
-                    ? `{
-                        ${Object.entries(remainingProps)
-                          .map(([key, value]) => `${key}: ${value}`)
-                          .join(",\n")}
-                      }`
-                    : "";
-
-                  const newCode = `[${[sprinklesObj, remainingObj]
-                    .filter(Boolean)
-                    .join(",\n")}]`;
-
-                  return fixer.replaceText(firstArg, newCode);
-                },
+            // 셀렉터가 있는 경우
+            if (hasSelectors(firstArg.properties)) {
+              const remainingProps = {};
+              firstArg.properties.forEach((prop) => {
+                const propName = prop.key.name || prop.key.value;
+                remainingProps[propName] = sourceCode.getText(prop.value);
               });
+
+              // sprinkles로 변환 가능한 속성 확인
+              const sprinklesProps = {};
+              Object.entries(remainingProps).forEach(([key, value]) => {
+                if (
+                  !isSelector(key) &&
+                  sprinklesConfig[key] &&
+                  !isVariable(value)
+                ) {
+                  const cleanValue = value.replace(/['"]/g, "");
+                  if (isAllowedValue(key, cleanValue)) {
+                    sprinklesProps[key] = value;
+                    delete remainingProps[key];
+                  }
+                }
+              });
+
+              if (Object.keys(sprinklesProps).length > 0) {
+                context.report({
+                  node: firstArg,
+                  messageId: "useSprinkles",
+                  data: {
+                    property: Object.keys(sprinklesProps).join(", "),
+                  },
+                  fix(fixer) {
+                    const sprinklesObj = `sprinkles({
+                      ${Object.entries(sprinklesProps)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join(",\n")}
+                    })`;
+
+                    const remainingObj = `{
+                      ${Object.entries(remainingProps)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join(",\n")}
+                    }`;
+
+                    const newCode = `[${[sprinklesObj, remainingObj]
+                      .filter(Boolean)
+                      .join(",\n")}]`;
+
+                    return fixer.replaceText(firstArg, newCode);
+                  },
+                });
+              }
+            } else {
+              // 셀렉터가 없는 일반적인 케이스
+              const sprinklesProps = {};
+              const remainingProps = {};
+
+              firstArg.properties.forEach((prop) => {
+                const propName = prop.key.name;
+                const propValue = prop.value;
+
+                if (isVariable(propValue)) {
+                  remainingProps[propName] = sourceCode.getText(propValue);
+                  return;
+                }
+
+                if (sprinklesConfig[propName]) {
+                  const valueText = sourceCode.getText(propValue);
+                  const cleanValue = valueText.replace(/['"]/g, "");
+                  if (isAllowedValue(propName, cleanValue)) {
+                    sprinklesProps[propName] = valueText;
+                  } else {
+                    remainingProps[propName] = valueText;
+                  }
+                } else {
+                  remainingProps[propName] = sourceCode.getText(propValue);
+                }
+              });
+
+              if (Object.keys(sprinklesProps).length > 0) {
+                context.report({
+                  node: firstArg,
+                  messageId: "useSprinkles",
+                  data: {
+                    property: Object.keys(sprinklesProps).join(", "),
+                  },
+                  fix(fixer) {
+                    const sprinklesObj = `sprinkles({
+                      ${Object.entries(sprinklesProps)
+                        .map(([key, value]) => `${key}: ${value}`)
+                        .join(",\n")}
+                    })`;
+
+                    const remainingObj = Object.keys(remainingProps).length
+                      ? `{
+                          ${Object.entries(remainingProps)
+                            .map(([key, value]) => `${key}: ${value}`)
+                            .join(",\n")}
+                        }`
+                      : "";
+
+                    const newCode = `[${[sprinklesObj, remainingObj]
+                      .filter(Boolean)
+                      .join(",\n")}]`;
+
+                    return fixer.replaceText(firstArg, newCode);
+                  },
+                });
+              }
             }
           }
           // 배열 전달 케이스 (style([{}]))
           else if (firstArg.type === "ArrayExpression") {
             firstArg.elements?.forEach((element) => {
               if (element.type === "ObjectExpression") {
+                if (hasSelectors(element.properties)) {
+                  // 셀렉터가 있는 경우는 그대로 둠
+                  return;
+                }
+
                 const sprinklesProps = {};
                 const remainingProps = {};
 
@@ -158,13 +222,11 @@ module.exports = {
                   const propName = prop.key.name;
                   const propValue = prop.value;
 
-                  // 값이 변수인 경우 무시
                   if (isVariable(propValue)) {
                     remainingProps[propName] = sourceCode.getText(propValue);
                     return;
                   }
 
-                  // 문자열이나 숫자 값인 경우만 체크
                   if (sprinklesConfig[propName]) {
                     const valueText = sourceCode.getText(propValue);
                     const cleanValue = valueText.replace(/['"]/g, "");
