@@ -134,6 +134,29 @@ const getPropsInArrayCase = ({ sprinklesConfig, element, sourceCode }) => {
   return { sprinklesProps, remainingProps };
 };
 
+const isValidArrayForm = ({ node, sprinklesConfig }) => {
+  if (isArrayExpression(node)) {
+    const elements = node.elements;
+    const firstElement = elements[0];
+    const secondElement = elements[1];
+
+    // 첫 번째 요소가 sprinkles 호출인지 확인
+    const isSprinklesCall = firstElement?.type === 'CallExpression' && firstElement?.callee.name === 'sprinkles';
+
+    // 두 번째 요소가 객체이고 sprinkles 속성을 포함하지 않는지 확인
+    if (isSprinklesCall && isObjectExpression(secondElement)) {
+      const regularProps = secondElement.properties.map((prop) => prop.key.name || prop.key.value);
+
+      // 일반 객체의 속성들이 sprinkles에 정의되지 않았는지 확인
+      const hasSprinklesProps = regularProps.some((prop) => sprinklesConfig[prop]);
+
+      // sprinkles 속성이 있으면 유효하지 않은 형태
+      return !hasSprinklesProps;
+    }
+  }
+  return false;
+};
+
 module.exports = {
   isObjectExpression,
   isArrayExpression,
@@ -142,4 +165,5 @@ module.exports = {
   getPropsInObjectCaseWithSelector,
   getPropsInObjectCaseWithoutSelector,
   getPropsInArrayCase,
+  isValidArrayForm,
 };
