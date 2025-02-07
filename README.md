@@ -11,8 +11,11 @@ if you use this plugin, i recommend this way.
 ```
 // scripts/exportSprinklesConfig.js
 
-const fs = require('fs');
-const path = require('path');
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 async function exportConfig() {
   // dynamic import for your sprinkles.config.js
@@ -27,12 +30,12 @@ async function exportConfig() {
 exportConfig().catch(console.error);
 ```
 
-### STEP 2. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js
+### STEP 2. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js. With [tsx](https://www.npmjs.com/package/tsx), you can run ESM script in Node.js
 
 ```
 // package.json
 
-"get-sprinkles-config": "ts-node scripts/exportSprinklesConfig.ts",
+"export-sprinkles": "tsx scripts/exportSprinklesConfig.ts",
 ```
 
 ### STEP 3. Add rule to your .eslintrc.js
@@ -154,5 +157,30 @@ const testStyle = sprinkles({
   cursor: "pointer",
   backgroundColor: "red",
   marginTop: 1,
+});
+```
+
+### Case 4 - Using Recipe
+
+```js
+// as-is
+const testStyle = recipe({
+  base: {
+    backgroundColor: "red",
+  },
+  variants: {
+    cursor: "pointer"
+  },
+});
+
+// to-be
+const testStyle = recipe({
+  // remove base style object and use sprinkles only
+  base: sprinkles({
+    backgroundColor: "red",
+  }),
+  variants: sprinkles({
+    cursor: "pointer",
+  }),
 });
 ```
