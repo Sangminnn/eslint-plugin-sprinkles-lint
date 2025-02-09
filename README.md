@@ -4,6 +4,8 @@ An ESLint plugin that warns when declaring styles without using already defined 
 
 This Plugin does not support ESLint Flat Config yet.
 
+Currently, this version does not support shorthands. It will be updated soon.
+
 if you use this plugin, i recommend this way.
 
 ### STEP 1. Export sprinkles.config.js to .eslintrc.sprinkles.js
@@ -183,4 +185,36 @@ const testStyle = recipe({
     cursor: "pointer",
   }),
 });
+```
+
+### Case 5 - Using style with sprinkles in recipe
+
+```js
+// as-is
+const testStyle2 = recipe({
+  base: style([{
+    backgroundColor: "red",
+  }]),
+  variants: {
+    cursor: "pointer"
+  },
+});
+
+// to-be
+const testStyle2 = recipe({
+  // remove style object and use sprinkles only
+  base: sprinkles({
+    backgroundColor: "red",
+  }),
+  variants: sprinkles({
+    cursor: "pointer",
+  }),
+});
+
+
+### Case 6 - Using style with sprinkles in recipe, but actually doesn't need style object
+
+```js
+// as-is
+
 ```
