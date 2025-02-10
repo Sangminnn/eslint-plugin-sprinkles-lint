@@ -4,7 +4,7 @@ An ESLint plugin that warns when declaring styles without using already defined 
 
 This Plugin does not support ESLint Flat Config yet.
 
-Currently, this version does not support shorthands. It will be updated soon.
+Shorthands does not support. because if you use shorthands in style (not sprinkles), it already throw error. So, i think it's not necessary to support shorthands.
 
 if you use this plugin, i recommend this way.
 
