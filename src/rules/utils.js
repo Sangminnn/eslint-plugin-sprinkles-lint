@@ -15,13 +15,37 @@ const hasSelectors = (properties) => {
 
 const checkDefinedValueInSprinkles = ({ sprinklesConfig, propName, value }) => {
   const configValue = sprinklesConfig[propName];
+  const cleanValue = value.replace(/['"]/g, '');
 
+  /**
+   * Array Case
+   *
+   * "width": [
+   *  "auto",
+   *  "100%",
+   *  "fit-content",
+   *  "100vw"
+   * ]
+   */
   if (Array.isArray(configValue)) {
-    return configValue.includes(Number(value)) || configValue.includes(value);
+    // check value is included in configValue
+    return configValue.includes(Number(cleanValue)) || configValue.includes(cleanValue);
   }
 
+  /**
+   * Object case
+   *
+   * "borderColor": {
+   *  "white": "#ffffff",
+   *  "gray": "#f6f6f6",
+   *  "gray-10": "#fafafa",
+   *  "gray-50": "#f6f6f6",
+   *  "gray-100": "#e5e5e5",
+   * }
+   */
   if (typeof configValue === 'object' && configValue !== null) {
-    return Object.values(configValue).includes(value);
+    // check key is included in configValue keys
+    return Object.keys(configValue).includes(cleanValue);
   }
 
   return false;
@@ -32,7 +56,6 @@ const getPropsInObjectCaseWithSelector = ({ sprinklesConfig, properties, sourceC
 
   const remainingProps = properties.reduce((acc, prop) => {
     const propName = prop.key.name || prop.key.value;
-
     acc[propName] = sourceCode.getText(prop.value);
     return acc;
   }, {});
@@ -42,19 +65,16 @@ const getPropsInObjectCaseWithSelector = ({ sprinklesConfig, properties, sourceC
     if (isVariable(value)) continue;
     if (!sprinklesConfig[key]) continue;
 
-    const cleanValue = value.replace(/['"]/g, '');
     const isDefinedValue = checkDefinedValueInSprinkles({
       sprinklesConfig,
       propName: key,
-      value: cleanValue,
+      value,
     });
 
-    if (!isDefinedValue) {
-      return;
+    if (isDefinedValue) {
+      sprinklesProps[key] = value;
+      delete remainingProps[key];
     }
-
-    sprinklesProps[key] = value;
-    delete remainingProps[key];
   }
 
   return { sprinklesProps, remainingProps };
@@ -79,12 +99,10 @@ const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, properties, sour
     }
 
     const valueText = sourceCode.getText(propValue);
-    const cleanValue = valueText.replace(/['"]/g, '');
-
     const isDefinedValue = checkDefinedValueInSprinkles({
       sprinklesConfig,
       propName,
-      value: cleanValue,
+      value: valueText,
     });
 
     if (isDefinedValue) {
@@ -167,7 +185,6 @@ const mergeSprinklesInArrayForm = ({ sourceCode, firstElement, sprinklesProps, r
     .filter((prop) => prop.length > 0) // remove empty string
     .join(',\n    ');
 
-  // create new sprinkles object
   const sprinklesObj = `sprinkles({
     ${existingProps}${Object.keys(sprinklesProps).length ? ',' : ''}
     ${Object.entries(sprinklesProps)
@@ -175,7 +192,6 @@ const mergeSprinklesInArrayForm = ({ sourceCode, firstElement, sprinklesProps, r
       .join(',\n    ')}
   })`;
 
-  // create remaining object
   const remainingObj = `{
     ${Object.entries(remainingProps)
       .map(([key, value]) => {
@@ -209,7 +225,6 @@ const mergeSprinklesWithExistingElements = ({ sourceCode, existingSprinklesCalls
     });
   });
 
-  // 새로운 속성들을 sprinkles와 remaining으로 분류
   Object.entries(sprinklesProps).forEach(([key, value]) => {
     sprinklesPropsMap.set(key, value);
   });
@@ -241,6 +256,17 @@ const mergeSprinklesWithExistingElements = ({ sourceCode, existingSprinklesCalls
   return `[${newElements.join(',\n  ')}]`;
 };
 
+const hasEmptyObjectInArray = (arrayNode) => {
+  return arrayNode.elements.some((element) => isObjectExpression(element) && element.properties.length === 0);
+};
+
+const findSprinklesCallInArray = (arrayNode) => {
+  return arrayNode.elements.find(
+    (element) =>
+      element?.type === 'CallExpression' && element.callee.name === 'sprinkles' && element.arguments?.[0]?.type === 'ObjectExpression',
+  );
+};
+
 module.exports = {
   isObjectExpression,
   isArrayExpression,
@@ -252,4 +278,6 @@ module.exports = {
   createSprinklesTransform,
   mergeSprinklesInArrayForm,
   mergeSprinklesWithExistingElements,
+  hasEmptyObjectInArray,
+  findSprinklesCallInArray,
 };
