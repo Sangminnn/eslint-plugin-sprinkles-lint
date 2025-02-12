@@ -1,5 +1,6 @@
-const isObjectExpression = (node) => node?.type === 'ObjectExpression';
-const isArrayExpression = (node) => node?.type === 'ArrayExpression';
+const isEmpty = (props) => Object.keys(props).length === 0;
+const isObject = (node) => node?.type === 'ObjectExpression';
+const isArray = (node) => node?.type === 'ArrayExpression';
 
 const isVariable = (node) => {
   return node.type === 'Identifier' || node.type === 'CallExpression' || node.type === 'MemberExpression';
@@ -257,7 +258,7 @@ const mergeSprinklesWithExistingElements = ({ sourceCode, existingSprinklesCalls
 };
 
 const hasEmptyObjectInArray = (arrayNode) => {
-  return arrayNode.elements.some((element) => isObjectExpression(element) && element.properties.length === 0);
+  return arrayNode.elements.some((element) => isObject(element) && element.properties.length === 0);
 };
 
 const findSprinklesCallInArray = (arrayNode) => {
@@ -268,8 +269,9 @@ const findSprinklesCallInArray = (arrayNode) => {
 };
 
 module.exports = {
-  isObjectExpression,
-  isArrayExpression,
+  isEmpty,
+  isObject,
+  isArray,
   isSelector,
   hasSelectors,
   getPropsInObjectCaseWithSelector,
