@@ -210,11 +210,30 @@ const testStyle2 = recipe({
     cursor: "pointer",
   }),
 });
-
+```
 
 ### Case 6 - Using style with sprinkles in recipe, but actually doesn't need style object
 
 ```js
 // as-is
+const testStyle2 = recipe({
+  base: [sprinkles({
+    backgroundColor: "red",
+  }), {
 
+  }],
+  variants: {
+    cursor: "pointer"
+  },
+});
+// to-be
+const testStyle2 = recipe({
+  // remove style object and use sprinkles only
+  base: sprinkles({
+    backgroundColor: "red",
+  }),
+  variants: sprinkles({
+    cursor: "pointer",
+  }),
+});
 ```
