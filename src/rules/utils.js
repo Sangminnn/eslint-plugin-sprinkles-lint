@@ -175,9 +175,9 @@ const createSprinklesTransform = ({ sprinklesProps, remainingProps }) => {
   return `[\n  ${sprinklesObj},\n  ${remainingObj}\n]`;
 };
 
-const mergeSprinklesInArrayForm = ({ sourceCode, firstElement, sprinklesProps, remainingProps }) => {
+const mergeSprinklesInArrayForm = ({ sourceCode, target, sprinklesProps, remainingProps }) => {
   // get existing sprinkles properties
-  const existingSprinklesProps = sourceCode.getText(firstElement.arguments[0]);
+  const existingSprinklesProps = sourceCode.getText(target.arguments[0]);
   const existingProps = existingSprinklesProps
     .slice(1, -1) // remove first and last brace, {}
     .split(',')

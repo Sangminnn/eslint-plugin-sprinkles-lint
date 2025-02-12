@@ -90,6 +90,11 @@ module.exports = {
                 property: Object.keys(sprinklesProps).join(', '),
               },
               fix(fixer) {
+                if (Object.keys(remainingProps).length === 0) {
+                  // return sprinkles only template
+                  return fixer.replaceText(node, `sprinkles(${sourceCode.getText(styleArgument)})`);
+                }
+
                 return fixer.replaceText(
                   styleArgument,
                   createSprinklesTransform({
@@ -108,11 +113,23 @@ module.exports = {
             if (sprinklesCall) {
               if (isEmptySprinkles) return;
 
+              const nonSprinklesObject = styleArgument.elements.find((element) => isObjectExpression(element));
+
+              const allProperties = [...sprinklesCall.arguments[0].properties, ...nonSprinklesObject.properties];
+
               const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
                 sprinklesConfig,
-                properties: sprinklesCall.arguments[0].properties,
+                properties: allProperties,
                 sourceCode,
               });
+
+              const isSeparatedCorrectly =
+                sprinklesCall.arguments[0].properties.every((prop) => prop.key.name in sprinklesProps) &&
+                nonSprinklesObject.properties.every((prop) => prop.key.name in remainingProps);
+
+              if (isSeparatedCorrectly) {
+                return;
+              }
 
               // style([sprinkles(...), {}]) => sprinkles(...)
               if (hasEmptyObjectInArray(styleArgument)) {
@@ -271,7 +288,7 @@ module.exports = {
                         baseProperty.value,
                         mergeSprinklesInArrayForm({
                           sourceCode,
-                          firstElement: sprinklesCall,
+                          target: sprinklesCall,
                           sprinklesProps,
                           remainingProps,
                         }),
