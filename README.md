@@ -43,7 +43,7 @@ export const shorthands = {
 
 - if you don't want shorthands
 
-```
+```js
 // scripts/exportSprinklesConfig.js
 
 import fs from 'fs';
@@ -67,7 +67,7 @@ exportConfig().catch(console.error);
 
 - if you want shorthands
 
-```
+```js
 // scripts/exportSprinklesConfig.js
 
 import fs from 'fs';
@@ -93,7 +93,7 @@ exportConfig().catch(console.error);
 
 ### STEP 3. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js. With [tsx](https://www.npmjs.com/package/tsx), you can run ESM script in Node.js
 
-```
+```json
 // package.json
 
 "export-sprinkles": "tsx scripts/exportSprinklesConfig.ts",
@@ -101,7 +101,7 @@ exportConfig().catch(console.error);
 
 ### STEP 4. Add rule to your .eslintrc.js
 
-```
+```js
 // .eslintrc.js
 
 "sprinkles-lint/no-use-style-declared-sprinkles": [
