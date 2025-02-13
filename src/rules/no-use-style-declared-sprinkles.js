@@ -9,7 +9,6 @@ const {
   hasSelectors,
   createSprinklesTransform,
   mergeSprinklesInArrayForm,
-  mergeSprinklesWithExistingElements,
   findSprinklesCallInArray,
   hasEmptyObjectInArray,
 } = require('./utils');
@@ -27,21 +26,30 @@ module.exports = {
         properties: {
           sprinklesConfig: {
             type: 'object',
-            additionalProperties: {
-              oneOf: [
-                {
-                  type: 'array',
-                  items: {
-                    oneOf: [{ type: 'string' }, { type: 'number' }],
-                  },
+            properties: {
+              properties: {
+                type: 'object',
+                additionalProperties: {
+                  oneOf: [
+                    {
+                      type: 'array',
+                      items: {
+                        oneOf: [{ type: 'string' }, { type: 'number' }],
+                      },
+                    },
+                    {
+                      type: 'object',
+                      additionalProperties: {
+                        type: 'string',
+                      },
+                    },
+                  ],
                 },
-                {
-                  type: 'object',
-                  additionalProperties: {
-                    type: 'string',
-                  },
-                },
-              ],
+              },
+              shorthands: {
+                type: 'array',
+                items: { type: 'string' },
+              },
             },
           },
           configPath: {
@@ -59,8 +67,23 @@ module.exports = {
 
   create(context) {
     const options = context.options[0] || {};
+
+    const loadConfig = (configPath, options) => {
+      if (configPath) {
+        const config = require(path.resolve(process.cwd(), configPath));
+        return {
+          properties: config.properties,
+          shorthands: config.shorthands,
+        };
+      }
+      return {
+        properties: options.sprinklesConfig?.properties || {},
+        shorthands: options.sprinklesConfig?.shorthands || [],
+      };
+    };
+
     const configPath = options.configPath;
-    const sprinklesConfig = configPath ? require(path.resolve(process.cwd(), configPath)) : options.sprinklesConfig;
+    const { properties: sprinklesConfig, shorthands } = loadConfig(configPath, options);
 
     return {
       CallExpression(node) {
@@ -79,6 +102,7 @@ module.exports = {
 
             const { sprinklesProps, remainingProps } = getPropsFunction({
               sprinklesConfig,
+              shorthands,
               properties: styleArgument.properties,
               sourceCode,
             });
@@ -140,6 +164,7 @@ module.exports = {
 
               const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
                 sprinklesConfig,
+                shorthands,
                 properties: allProperties,
                 sourceCode,
               });
@@ -218,6 +243,7 @@ module.exports = {
 
               const { sprinklesProps, remainingProps } = getPropsInArrayCase({
                 sprinklesConfig,
+                shorthands,
                 element,
                 sourceCode,
               });
@@ -281,6 +307,7 @@ module.exports = {
 
             const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
               sprinklesConfig,
+              shorthands,
               properties: styleObject.properties,
               sourceCode,
             });
@@ -323,6 +350,7 @@ module.exports = {
 
               const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
                 sprinklesConfig,
+                shorthands,
                 properties: node.properties,
                 sourceCode,
               });

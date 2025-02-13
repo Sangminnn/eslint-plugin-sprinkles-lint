@@ -14,7 +14,11 @@ const hasSelectors = (properties) => {
   return properties.some((prop) => isSelector(prop.key.name || prop.key.value));
 };
 
-const checkDefinedValueInSprinkles = ({ sprinklesConfig, propName, value }) => {
+const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, value }) => {
+  if (shorthands && shorthands.includes(propName)) {
+    return true;
+  }
+
   const configValue = sprinklesConfig[propName];
   const cleanValue = value.replace(/['"]/g, '');
 
@@ -81,27 +85,23 @@ const getPropsInObjectCaseWithSelector = ({ sprinklesConfig, properties, sourceC
   return { sprinklesProps, remainingProps };
 };
 
-const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, properties, sourceCode }) => {
+const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
   const sprinklesProps = {};
   const remainingProps = {};
 
   for (const prop of properties) {
     const propName = prop.key.name || prop.key.value;
     const propValue = prop.value;
+    const valueText = sourceCode.getText(propValue);
 
     if (isVariable(propValue)) {
-      remainingProps[propName] = sourceCode.getText(propValue);
+      remainingProps[propName] = valueText;
       continue;
     }
 
-    if (!sprinklesConfig[propName]) {
-      remainingProps[propName] = sourceCode.getText(propValue);
-      continue;
-    }
-
-    const valueText = sourceCode.getText(propValue);
     const isDefinedValue = checkDefinedValueInSprinkles({
       sprinklesConfig,
+      shorthands,
       propName,
       value: valueText,
     });
@@ -116,29 +116,25 @@ const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, properties, sour
   return { sprinklesProps, remainingProps };
 };
 
-const getPropsInArrayCase = ({ sprinklesConfig, element, sourceCode }) => {
+const getPropsInArrayCase = ({ sprinklesConfig, shorthands, element, sourceCode }) => {
   const sprinklesProps = {};
   const remainingProps = {};
 
   for (const prop of element.properties) {
     const propName = prop.key.name || prop.key.value;
     const propValue = prop.value;
+    const valueText = sourceCode.getText(propValue);
 
     if (isVariable(propValue)) {
-      remainingProps[propName] = sourceCode.getText(propValue);
+      remainingProps[propName] = valueText;
       continue;
     }
 
-    if (!sprinklesConfig[propName]) {
-      remainingProps[propName] = sourceCode.getText(propValue);
-      continue;
-    }
-
-    const valueText = sourceCode.getText(propValue);
     const cleanValue = valueText.replace(/['"]/g, '');
 
     const isDefinedValue = checkDefinedValueInSprinkles({
       sprinklesConfig,
+      shorthands,
       propName,
       value: cleanValue,
     });

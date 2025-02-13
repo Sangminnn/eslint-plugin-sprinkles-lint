@@ -4,11 +4,44 @@ An ESLint plugin that warns when declaring styles without using already defined 
 
 This Plugin does not support ESLint Flat Config yet.
 
-Shorthands does not support. because if you use shorthands in style (not sprinkles), it already throw error. So, i think it's not necessary to support shorthands.
+Shorthands also supported. 
 
 if you use this plugin, i recommend this way.
 
-### STEP 1. Export sprinkles.config.js to .eslintrc.sprinkles.js
+### STEP 1. Split your config file
+
+i recommend you to use separated config file and using this to import in your sprinkles.css.ts 
+
+```ts
+export const sprinklesProperties = {
+  position: ['absolute', 'relative', 'fixed', 'sticky'],
+  display: ['none', 'flex', 'inline-flex', 'block', 'inline', 'grid'],
+  flexDirection: ['row', 'column'],
+  justifyContent: ['stretch', 'flex-start', 'center', 'flex-end', 'space-around', 'space-between'],
+  alignItems: ['stretch', 'flex-start', 'center', 'flex-end', 'baseline'],
+  fontWeight: [500, 700],
+  lineHeight: ['normal', 1, 1.1, 1.2, 1.3, 1.4, 1.5, 1.6]
+} as const;
+
+export const colorSprinklesProperties = {
+  color: theme.colors,
+  backgroundColor: theme.colors,
+} as const;
+
+type Shorthands = Record<string, Array<keyof typeof sprinklesProperties>>;
+
+export const shorthands = {
+  p: ['paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight'],
+  px: ['paddingLeft', 'paddingRight'],
+  py: ['paddingTop', 'paddingBottom']
+} satisfies Shorthands;
+
+```
+
+### STEP 2. Export sprinkles.config.js to .eslintrc.sprinkles.js
+
+
+- if you don't want shorthands
 
 ```
 // scripts/exportSprinklesConfig.js
@@ -32,7 +65,33 @@ async function exportConfig() {
 exportConfig().catch(console.error);
 ```
 
-### STEP 2. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js. With [tsx](https://www.npmjs.com/package/tsx), you can run ESM script in Node.js
+- if you want shorthands
+
+```
+// scripts/exportSprinklesConfig.js
+
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+async function exportConfig() {
+  const { sprinklesProperties, shorthands } = await import('../src/constants/sprinkles');
+
+  fs.writeFileSync(
+    path.resolve(__dirname, '../.eslintrc.sprinkles.js'),
+    `module.exports = {
+      properties: ${JSON.stringify(sprinklesProperties, null, 2)},
+      shorthands: ${JSON.stringify(Object.keys(shorthands), null, 2)}
+    };`,
+  );
+}
+
+exportConfig().catch(console.error);
+```
+
+### STEP 3. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js. With [tsx](https://www.npmjs.com/package/tsx), you can run ESM script in Node.js
 
 ```
 // package.json
@@ -40,7 +99,7 @@ exportConfig().catch(console.error);
 "export-sprinkles": "tsx scripts/exportSprinklesConfig.ts",
 ```
 
-### STEP 3. Add rule to your .eslintrc.js
+### STEP 4. Add rule to your .eslintrc.js
 
 ```
 // .eslintrc.js
@@ -85,15 +144,18 @@ module.exports = {
 ```js
 // sprinkles.config.js
 module.exports = {
-  marginTop: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-  cursor: ["pointer"],
-  // can use array
-  backgroundColor: ["red", "blue", "green"],
-
-  // can use object
-  flex: {
-    1: "1 1 0%",
+  properties: {
+    marginTop: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    cursor: ["pointer"],
+    // can use array
+    backgroundColor: ["red", "blue", "green"],
+  
+    // can use object
+    flex: {
+      1: "1 1 0%",
+    },
   },
+  shorthands: ["p", "px", "py"],
 };
 ```
 
@@ -103,11 +165,13 @@ module.exports = {
 // as-is
 const testStyle = style({
   backgroundColor: "red",
+  px: 1
 });
 
 // to-be
 const testStyle = sprinkles({
   backgroundColor: "red",
+  px: 1 // lint aware 'px' in sprinkles (by shorthands)
 });
 ```
 
