@@ -56,6 +56,9 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
   return false;
 };
 
+const getPropsInObject = (properties) =>
+  hasSelectors(properties) ? getPropsInObjectCaseWithSelector : getPropsInObjectCaseWithoutSelector;
+
 const getPropsInObjectCaseWithSelector = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
   const sprinklesProps = {};
 
@@ -100,37 +103,6 @@ const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, shorthands, prop
       continue;
     }
 
-    const isDefinedValue = checkDefinedValueInSprinkles({
-      sprinklesConfig,
-      shorthands,
-      propName,
-      value: valueText,
-    });
-
-    if (isDefinedValue) {
-      sprinklesProps[propName] = valueText;
-    } else {
-      remainingProps[propName] = valueText;
-    }
-  }
-
-  return { sprinklesProps, remainingProps };
-};
-
-const getPropsInArrayCase = ({ sprinklesConfig, shorthands, element, sourceCode }) => {
-  const sprinklesProps = {};
-  const remainingProps = {};
-
-  for (const prop of element.properties) {
-    const propName = prop.key.name || prop.key.value;
-    const propValue = prop.value;
-    const valueText = sourceCode.getText(propValue);
-
-    if (isVariable(propValue)) {
-      remainingProps[propName] = valueText;
-      continue;
-    }
-
     const cleanValue = valueText.replace(/['"]/g, '');
 
     const isDefinedValue = checkDefinedValueInSprinkles({
@@ -150,7 +122,7 @@ const getPropsInArrayCase = ({ sprinklesConfig, shorthands, element, sourceCode 
   return { sprinklesProps, remainingProps };
 };
 
-const createSprinklesTransform = ({ sourceCode, variables = [], sprinklesProps, remainingProps }) => {
+const createSprinklesTransform = ({ sourceCode, variables = [], sprinklesProps, remainingProps, isArrayContext = false }) => {
   const sprinklesString = Object.entries(sprinklesProps)
     .map(([key, value]) => `${key}: ${value}`)
     .join(',\n    ');
@@ -165,7 +137,8 @@ const createSprinklesTransform = ({ sourceCode, variables = [], sprinklesProps, 
       `sprinkles({\n    ${sprinklesString}\n  })`,
       ...(isEmpty(remainingProps) ? [] : [`{\n    ${remainingString}\n  }`]),
     ];
-    return `style([${elements.join(',\n  ')}])`;
+    // 배열 컨텍스트일 때는 배열만 반환
+    return isArrayContext ? `[${elements.join(',\n  ')}]` : `style([${elements.join(',\n  ')}])`;
   }
 
   return `sprinkles({\n    ${sprinklesString}\n  })`;
@@ -269,6 +242,29 @@ const findSprinklesCallInArray = (arrayNode) => {
   );
 };
 
+const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, sprinklesProps, remainingProps }) => {
+  const isSprinklesPropsDefined = sprinklesProps?.every((prop) =>
+    checkDefinedValueInSprinkles({
+      sprinklesConfig,
+      shorthands,
+      propName: prop.key.name,
+      value: sourceCode.getText(prop.value),
+    }),
+  );
+
+  const isRemainingPropsNotDefined = remainingProps?.every(
+    (prop) =>
+      !checkDefinedValueInSprinkles({
+        sprinklesConfig,
+        shorthands,
+        propName: prop.key.name,
+        value: sourceCode.getText(prop.value),
+      }),
+  );
+
+  return isSprinklesPropsDefined && isRemainingPropsNotDefined;
+};
+
 module.exports = {
   isEmpty,
   isObject,
@@ -277,12 +273,11 @@ module.exports = {
   isSelector,
   hasSelectors,
   checkDefinedValueInSprinkles,
-  getPropsInObjectCaseWithSelector,
-  getPropsInObjectCaseWithoutSelector,
-  getPropsInArrayCase,
+  getPropsInObject,
   createSprinklesTransform,
   mergeSprinklesInArrayForm,
   mergeSprinklesWithExistingElements,
   hasEmptyObjectInArray,
   findSprinklesCallInArray,
+  checkSeparatedCorrectly,
 };

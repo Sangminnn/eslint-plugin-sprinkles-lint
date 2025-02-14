@@ -5,13 +5,11 @@ const {
   isArray,
   isVariable,
   hasSelectors,
-  checkDefinedValueInSprinkles,
-  getPropsInObjectCaseWithSelector,
-  getPropsInObjectCaseWithoutSelector,
-  getPropsInArrayCase,
+  getPropsInObject,
   createSprinklesTransform,
   mergeSprinklesInArrayForm,
   findSprinklesCallInArray,
+  checkSeparatedCorrectly,
 } = require('./utils');
 
 module.exports = {
@@ -82,9 +80,7 @@ module.exports = {
 
           // Case. style({})
           if (isObject(styleArgument)) {
-            const getPropsFunction = hasSelectors(styleArgument.properties)
-              ? getPropsInObjectCaseWithSelector
-              : getPropsInObjectCaseWithoutSelector;
+            const getPropsFunction = getPropsInObject(styleArgument.properties);
 
             const { sprinklesProps, remainingProps } = getPropsFunction({
               sprinklesConfig,
@@ -112,10 +108,9 @@ module.exports = {
                 }
 
                 return fixer.replaceText(
-                  styleArgument,
+                  node,
                   createSprinklesTransform({
                     sourceCode,
-                    variables: [],
                     sprinklesProps,
                     remainingProps,
                   }),
@@ -133,38 +128,36 @@ module.exports = {
             // already use sprinkles but some properties are in style object not in sprinkles
             if (sprinklesCall) {
               if (isEmptySprinkles) return;
-
               const nonSprinklesObject = styleArgument.elements.find((element) => isObject(element));
-              const allProperties = [...(sprinklesCall?.arguments?.[0]?.properties || []), ...(nonSprinklesObject?.properties || [])];
 
-              const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
+              const sprinklesProperties = sprinklesCall?.arguments?.[0]?.properties || [];
+              const nonSprinklesProperties = nonSprinklesObject?.properties || [];
+
+              // if sprinkles and nonSprinkles are separated correctly, return instantly
+              if (
+                checkSeparatedCorrectly({
+                  sprinklesConfig,
+                  shorthands,
+                  sourceCode,
+                  sprinklesProps: sprinklesProperties,
+                  remainingProps: nonSprinklesProperties,
+                })
+              ) {
+                return;
+              }
+
+              const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];
+
+              const getPropsFunction = getPropsInObject(allProperties);
+              const { sprinklesProps, remainingProps } = getPropsFunction({
                 sprinklesConfig,
                 shorthands,
                 properties: allProperties,
                 sourceCode,
               });
 
-              // if sprinkles and nonSprinkles are separated correctly, return instantly
-              const isSeparatedCorrectly =
-                sprinklesCall?.arguments?.[0]?.properties?.every(
-                  (prop) => prop.key.name in sprinklesProps || shorthands.includes(prop.key.name),
-                ) &&
-                nonSprinklesObject.properties.every(
-                  (prop) =>
-                    !checkDefinedValueInSprinkles({
-                      sprinklesConfig,
-                      shorthands,
-                      propName: prop.key.name,
-                      value: sourceCode.getText(prop.value),
-                    }),
-                );
-
-              if (isSeparatedCorrectly) {
-                return;
-              }
-
               if (isEmpty(sprinklesProps)) {
-                const remainingPropsString = Object.entries(remainingProps)
+                const formattedRemainingProps = Object.entries(remainingProps)
                   .map(([key, value]) => `${key}: ${value}`)
                   .join(',\n  ');
 
@@ -176,11 +169,11 @@ module.exports = {
                   },
                   fix(fixer) {
                     if (variables.length > 0) {
-                      return fixer.replaceText(node, `style({\n  ${remainingPropsString}\n})`);
+                      return fixer.replaceText(node, `style({\n  ${formattedRemainingProps}\n})`);
                     } else {
                       return fixer.replaceText(
                         node,
-                        `style([${variables.map((el) => sourceCode.getText(el)).join(', ')}, ${remainingPropsString}])`,
+                        `style([${variables.map((el) => sourceCode.getText(el)).join(', ')}, ${formattedRemainingProps}])`,
                       );
                     }
                   },
@@ -197,20 +190,14 @@ module.exports = {
                   property: targetProperties,
                 },
                 fix(fixer) {
-                  if (variables.length === 0 && isEmpty(remainingProps)) {
-                    const sprinklesString = Object.entries(sprinklesProps)
-                      .map(([key, value]) => `${key}: ${value}`)
-                      .join(',\n    ');
-                    return fixer.replaceText(node, `sprinkles({\n    ${sprinklesString}\n  })`);
-                  }
-
                   return fixer.replaceText(
-                    node,
+                    styleArgument,
                     createSprinklesTransform({
                       sourceCode,
                       variables,
                       sprinklesProps,
                       remainingProps,
+                      isArrayContext: true,
                     }),
                   );
                 },
@@ -218,44 +205,48 @@ module.exports = {
               return;
             }
 
-            // not use sprinkles and use only style object, but some properties have to place in sprinkles
-            styleArgument.elements?.forEach((element) => {
-              if (!isObject(element) || hasSelectors(element.properties)) {
-                return;
-              }
+            if (!sprinklesCall) {
+              // not use sprinkles and use only style object, but some properties have to place in sprinkles
+              styleArgument.elements?.forEach((element) => {
+                if (!isObject(element) || hasSelectors(element.properties)) {
+                  return;
+                }
 
-              const { sprinklesProps, remainingProps } = getPropsInArrayCase({
-                sprinklesConfig,
-                shorthands,
-                element,
-                sourceCode,
+                const getPropsFunction = getPropsInObject(element.properties);
+                const { sprinklesProps, remainingProps } = getPropsFunction({
+                  sprinklesConfig,
+                  shorthands,
+                  properties: element.properties,
+                  sourceCode,
+                });
+
+                if (isEmpty(sprinklesProps)) {
+                  return;
+                }
+
+                const targetProperties = Object.keys(sprinklesProps).join(', ');
+
+                context.report({
+                  node: element,
+                  messageId: 'useSprinkles',
+                  data: {
+                    property: targetProperties,
+                  },
+                  fix(fixer) {
+                    return fixer.replaceText(
+                      element,
+                      createSprinklesTransform({
+                        sourceCode,
+                        variables,
+                        sprinklesProps,
+                        remainingProps,
+                        isArrayContext: true,
+                      }),
+                    );
+                  },
+                });
               });
-
-              if (isEmpty(sprinklesProps)) {
-                return;
-              }
-
-              const targetProperties = Object.keys(sprinklesProps).join(', ');
-
-              context.report({
-                node: element,
-                messageId: 'useSprinkles',
-                data: {
-                  property: targetProperties,
-                },
-                fix(fixer) {
-                  return fixer.replaceText(
-                    element,
-                    createSprinklesTransform({
-                      sourceCode,
-                      variables,
-                      sprinklesProps,
-                      remainingProps,
-                    }),
-                  );
-                },
-              });
-            });
+            }
           }
         }
 
@@ -295,7 +286,8 @@ module.exports = {
               return;
             }
 
-            const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
+            const getPropsFunction = getPropsInObject(styleObject.properties);
+            const { sprinklesProps, remainingProps } = getPropsFunction({
               sprinklesConfig,
               shorthands,
               properties: styleObject.properties,
@@ -339,14 +331,13 @@ module.exports = {
             const checkVariantStyles = (node) => {
               if (!isObject(node)) return;
 
-              const { sprinklesProps, remainingProps } = getPropsInObjectCaseWithoutSelector({
+              const getPropsFunction = getPropsInObject(node.properties);
+              const { sprinklesProps, remainingProps } = getPropsFunction({
                 sprinklesConfig,
                 shorthands,
                 properties: node.properties,
                 sourceCode,
               });
-
-              const variables = baseProperty.value.elements.filter((el) => el !== sprinklesCall && isVariable(el));
 
               if (!isEmpty(sprinklesProps)) {
                 context.report({
@@ -360,7 +351,6 @@ module.exports = {
                       node,
                       createSprinklesTransform({
                         sourceCode,
-                        variables,
                         sprinklesProps,
                         remainingProps,
                       }),
