@@ -80,11 +80,6 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
       continue;
     }
 
-    if (!sprinklesConfig[propName]) {
-      remainingMap.set(propName, valueText);
-      continue;
-    }
-
     const cleanValue = valueText.replace(/['"]/g, '');
 
     const isDefinedValue = checkDefinedValueInSprinkles({
@@ -108,14 +103,18 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
   };
 };
 
-const createTransformTemplate = ({ sourceCode, variables = [], sprinklesProps, remainingProps, isArrayContext = false }) => {
-  const sprinklesString = Object.entries(sprinklesProps)
+const cleanPropsString = (props) =>
+  Object.entries(props)
     .map(([key, value]) => `${key}: ${value}`)
+    .join(',\n    ')
+    .split(',')
+    .map((prop) => prop.trim())
+    .filter((prop) => prop.length > 0)
     .join(',\n    ');
 
-  const remainingString = Object.entries(remainingProps)
-    .map(([key, value]) => `${key}: ${value}`)
-    .join(',\n    ');
+const createTransformTemplate = ({ sourceCode, variables = [], sprinklesProps, remainingProps, isArrayContext = false }) => {
+  const sprinklesString = cleanPropsString(sprinklesProps);
+  const remainingString = cleanPropsString(remainingProps);
 
   if (variables.length > 0 || !isEmpty(remainingProps)) {
     const elements = [

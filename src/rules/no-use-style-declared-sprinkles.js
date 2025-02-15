@@ -7,7 +7,6 @@ const {
   hasSelectors,
   separateProps,
   createTransformTemplate,
-  mergeSprinklesInArrayForm,
   findSprinklesCallInArray,
   checkSeparatedCorrectly,
 } = require('./utils');
@@ -304,12 +303,12 @@ module.exports = {
 
                   return fixer.replaceText(
                     baseProperty.value,
-                    mergeSprinklesInArrayForm({
+                    createTransformTemplate({
                       sourceCode,
-                      target: sprinklesCall,
                       variables,
                       sprinklesProps,
                       remainingProps,
+                      isArrayContext: true,
                     }),
                   );
                 },
