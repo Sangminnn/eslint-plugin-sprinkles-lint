@@ -5,8 +5,8 @@ const {
   isArray,
   isVariable,
   hasSelectors,
-  getPropsInObject,
-  createSprinklesTransform,
+  separateProps,
+  createTransformTemplate,
   mergeSprinklesInArrayForm,
   findSprinklesCallInArray,
   checkSeparatedCorrectly,
@@ -69,20 +69,18 @@ module.exports = {
     const configPath = options.configPath;
     const { properties: sprinklesConfig, shorthands } = require(path.resolve(process.cwd(), configPath));
 
+    const sourceCode = context.getSourceCode();
+
     return {
       CallExpression(node) {
         // using style
         if (node.callee.name === 'style') {
-          const sourceCode = context.getSourceCode();
-
           // if style({}), {} is node.arguments[0]
           const styleArgument = node.arguments[0];
 
           // Case. style({})
           if (isObject(styleArgument)) {
-            const getPropsFunction = getPropsInObject(styleArgument.properties);
-
-            const { sprinklesProps, remainingProps } = getPropsFunction({
+            const { sprinklesProps, remainingProps } = separateProps({
               sprinklesConfig,
               shorthands,
               properties: styleArgument.properties,
@@ -109,7 +107,7 @@ module.exports = {
 
                 return fixer.replaceText(
                   node,
-                  createSprinklesTransform({
+                  createTransformTemplate({
                     sourceCode,
                     sprinklesProps,
                     remainingProps,
@@ -148,8 +146,7 @@ module.exports = {
 
               const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];
 
-              const getPropsFunction = getPropsInObject(allProperties);
-              const { sprinklesProps, remainingProps } = getPropsFunction({
+              const { sprinklesProps, remainingProps } = separateProps({
                 sprinklesConfig,
                 shorthands,
                 properties: allProperties,
@@ -192,7 +189,7 @@ module.exports = {
                 fix(fixer) {
                   return fixer.replaceText(
                     styleArgument,
-                    createSprinklesTransform({
+                    createTransformTemplate({
                       sourceCode,
                       variables,
                       sprinklesProps,
@@ -212,8 +209,7 @@ module.exports = {
                   return;
                 }
 
-                const getPropsFunction = getPropsInObject(element.properties);
-                const { sprinklesProps, remainingProps } = getPropsFunction({
+                const { sprinklesProps, remainingProps } = separateProps({
                   sprinklesConfig,
                   shorthands,
                   properties: element.properties,
@@ -235,7 +231,7 @@ module.exports = {
                   fix(fixer) {
                     return fixer.replaceText(
                       element,
-                      createSprinklesTransform({
+                      createTransformTemplate({
                         sourceCode,
                         variables,
                         sprinklesProps,
@@ -252,7 +248,6 @@ module.exports = {
 
         // using recipe
         if (node.callee.name === 'recipe') {
-          const sourceCode = context.getSourceCode();
           const recipeArgument = node.arguments[0];
           const baseProperty = recipeArgument.properties.find((prop) => prop.key.name === 'base');
 
@@ -286,8 +281,7 @@ module.exports = {
               return;
             }
 
-            const getPropsFunction = getPropsInObject(styleObject.properties);
-            const { sprinklesProps, remainingProps } = getPropsFunction({
+            const { sprinklesProps, remainingProps } = separateProps({
               sprinklesConfig,
               shorthands,
               properties: styleObject.properties,
@@ -331,8 +325,7 @@ module.exports = {
             const checkVariantStyles = (node) => {
               if (!isObject(node)) return;
 
-              const getPropsFunction = getPropsInObject(node.properties);
-              const { sprinklesProps, remainingProps } = getPropsFunction({
+              const { sprinklesProps, remainingProps } = separateProps({
                 sprinklesConfig,
                 shorthands,
                 properties: node.properties,
@@ -349,7 +342,7 @@ module.exports = {
                   fix(fixer) {
                     return fixer.replaceText(
                       node,
-                      createSprinklesTransform({
+                      createTransformTemplate({
                         sourceCode,
                         sprinklesProps,
                         remainingProps,

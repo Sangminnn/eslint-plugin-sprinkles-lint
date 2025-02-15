@@ -20,7 +20,7 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
   }
 
   const configValue = sprinklesConfig[propName];
-  const cleanValue = value.replace(/['"]/g, '').trim();
+  const cleanValue = typeof value === 'number' ? value : value.replace(/['"]/g, '').trim();
 
   /**
    * Array Case
@@ -56,50 +56,32 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
   return false;
 };
 
-const getPropsInObject = (properties) =>
-  hasSelectors(properties) ? getPropsInObjectCaseWithSelector : getPropsInObjectCaseWithoutSelector;
-
-const getPropsInObjectCaseWithSelector = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
-  const sprinklesProps = {};
-
-  const remainingProps = properties.reduce((acc, prop) => {
-    const propName = prop.key.name || prop.key.value;
-    acc[propName] = sourceCode.getText(prop.value);
-    return acc;
-  }, {});
-
-  for (const [key, value] of Object.entries(remainingProps)) {
-    if (isSelector(key)) continue;
-    if (isVariable(value)) continue;
-    if (!sprinklesConfig[key]) continue;
-
-    const isDefinedValue = checkDefinedValueInSprinkles({
-      sprinklesConfig,
-      shorthands,
-      propName: key,
-      value,
-    });
-
-    if (isDefinedValue) {
-      sprinklesProps[key] = value;
-      delete remainingProps[key];
-    }
-  }
-
-  return { sprinklesProps, remainingProps };
-};
-
-const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
-  const sprinklesProps = {};
-  const remainingProps = {};
+const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
+  const sprinklesMap = new Map();
+  const remainingMap = new Map();
 
   for (const prop of properties) {
     const propName = prop.key.name || prop.key.value;
     const propValue = prop.value;
     const valueText = sourceCode.getText(propValue);
 
+    // 이미 처리된 속성이면 스킵
+    if (sprinklesMap.has(propName) || remainingMap.has(propName)) {
+      continue;
+    }
+
+    if (isSelector(propName)) {
+      remainingMap.set(propName, valueText);
+      continue;
+    }
+
     if (isVariable(propValue)) {
-      remainingProps[propName] = valueText;
+      remainingMap.set(propName, valueText);
+      continue;
+    }
+
+    if (!sprinklesConfig[propName]) {
+      remainingMap.set(propName, valueText);
       continue;
     }
 
@@ -113,16 +95,20 @@ const getPropsInObjectCaseWithoutSelector = ({ sprinklesConfig, shorthands, prop
     });
 
     if (isDefinedValue) {
-      sprinklesProps[propName] = valueText;
+      sprinklesMap.set(propName, valueText);
     } else {
-      remainingProps[propName] = valueText;
+      remainingMap.set(propName, valueText);
     }
   }
 
-  return { sprinklesProps, remainingProps };
+  // Map을 객체로 변환
+  return {
+    sprinklesProps: Object.fromEntries(sprinklesMap),
+    remainingProps: Object.fromEntries(remainingMap),
+  };
 };
 
-const createSprinklesTransform = ({ sourceCode, variables = [], sprinklesProps, remainingProps, isArrayContext = false }) => {
+const createTransformTemplate = ({ sourceCode, variables = [], sprinklesProps, remainingProps, isArrayContext = false }) => {
   const sprinklesString = Object.entries(sprinklesProps)
     .map(([key, value]) => `${key}: ${value}`)
     .join(',\n    ');
@@ -137,7 +123,7 @@ const createSprinklesTransform = ({ sourceCode, variables = [], sprinklesProps, 
       `sprinkles({\n    ${sprinklesString}\n  })`,
       ...(isEmpty(remainingProps) ? [] : [`{\n    ${remainingString}\n  }`]),
     ];
-    // 배열 컨텍스트일 때는 배열만 반환
+
     return isArrayContext ? `[${elements.join(',\n  ')}]` : `style([${elements.join(',\n  ')}])`;
   }
 
@@ -179,62 +165,6 @@ const mergeSprinklesInArrayForm = ({ sourceCode, target, variables, sprinklesPro
   return `[${elements.join(',\n  ')}]`;
 };
 
-const mergeSprinklesWithExistingElements = ({ sourceCode, existingSprinklesCalls, sprinklesProps, remainingProps, existingElements }) => {
-  // Map을 사용하여 중복 속성 관리
-  const sprinklesPropsMap = new Map();
-  const remainingPropsMap = new Map();
-
-  // 기존 sprinkles 속성들 Map에 추가
-  existingSprinklesCalls.forEach((call) => {
-    if (!call.arguments?.[0]) return;
-
-    const props = sourceCode.getText(call.arguments[0]);
-    const propsText = props.slice(1, -1).trim();
-    const propPairs = propsText.split(',').map((pair) => pair.trim());
-
-    propPairs.forEach((pair) => {
-      if (pair) {
-        const [key, value] = pair.split(':').map((part) => part.trim());
-        sprinklesPropsMap.set(key, value);
-      }
-    });
-  });
-
-  Object.entries(sprinklesProps).forEach(([key, value]) => {
-    sprinklesPropsMap.set(key, value);
-  });
-
-  Object.entries(remainingProps).forEach(([key, value]) => {
-    remainingPropsMap.set(key, value);
-  });
-
-  const mergedSprinklesObj = `sprinkles({
-    ${Array.from(sprinklesPropsMap.entries())
-      .map(([key, value]) => `${key}: ${value}`)
-      .join(',\n    ')}
-  })`;
-
-  const remainingObj =
-    remainingPropsMap.size > 0
-      ? `{
-        ${Array.from(remainingPropsMap.entries())
-          .map(([key, value]) => `${key}: ${value}`)
-          .join(',\n    ')}
-      }`
-      : '';
-
-  if (existingElements.length === 0 && !remainingObj) {
-    return mergedSprinklesObj;
-  }
-
-  const newElements = [...existingElements, mergedSprinklesObj, ...(remainingObj ? [remainingObj] : [])];
-  return `[${newElements.join(',\n  ')}]`;
-};
-
-const hasEmptyObjectInArray = (arrayNode) => {
-  return arrayNode.elements.some((element) => isObject(element) && element.properties.length === 0);
-};
-
 const findSprinklesCallInArray = (arrayNode) => {
   return arrayNode.elements.find(
     (element) =>
@@ -272,12 +202,9 @@ module.exports = {
   isVariable,
   isSelector,
   hasSelectors,
-  checkDefinedValueInSprinkles,
-  getPropsInObject,
-  createSprinklesTransform,
+  separateProps,
+  createTransformTemplate,
   mergeSprinklesInArrayForm,
-  mergeSprinklesWithExistingElements,
-  hasEmptyObjectInArray,
   findSprinklesCallInArray,
   checkSeparatedCorrectly,
 };
