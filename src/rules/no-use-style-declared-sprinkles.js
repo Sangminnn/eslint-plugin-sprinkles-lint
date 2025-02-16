@@ -180,14 +180,14 @@ module.exports = {
               const targetProperties = Object.keys(sprinklesProps).join(', ');
 
               context.report({
-                node: styleArgument,
+                node,
                 messageId: 'useSprinkles',
                 data: {
                   property: targetProperties,
                 },
                 fix(fixer) {
                   return fixer.replaceText(
-                    styleArgument,
+                    node,
                     createTransformTemplate({
                       sourceCode,
                       variables,
@@ -262,6 +262,21 @@ module.exports = {
             const styleObject = baseProperty.value.elements.find((element) => isObject(element));
             const isEmptyStyleObject = !styleObject || styleObject.properties.length === 0;
 
+            const sprinklesProperties = sprinklesCall.arguments[0].properties;
+            const remainingProperties = styleObject?.properties || [];
+
+            if (
+              checkSeparatedCorrectly({
+                sprinklesConfig,
+                shorthands,
+                sourceCode,
+                sprinklesProps: sprinklesProperties,
+                remainingProps: remainingProperties,
+              })
+            ) {
+              return;
+            }
+
             if (isEmptyStyleObject) {
               context.report({
                 node: baseProperty.value,
@@ -280,10 +295,12 @@ module.exports = {
               return;
             }
 
+            const allProperties = [...sprinklesProperties, ...remainingProperties];
+
             const { sprinklesProps, remainingProps } = separateProps({
               sprinklesConfig,
               shorthands,
-              properties: styleObject.properties,
+              properties: allProperties,
               sourceCode,
             });
 
