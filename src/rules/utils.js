@@ -2,6 +2,8 @@ const isEmpty = (props) => Object.keys(props).length === 0;
 const isObject = (node) => node?.type === 'ObjectExpression';
 const isArray = (node) => node?.type === 'ArrayExpression';
 
+const isStyleArray = (node) => node?.type === 'CallExpression' && node.callee.name === 'style' && isArray(node.arguments[0]);
+
 const isVariable = (node) => {
   return node.type === 'Identifier' || node.type === 'CallExpression' || node.type === 'MemberExpression';
 };
@@ -111,14 +113,24 @@ const isRgbaOrComplexString = (value) => {
 
 const cleanPropsString = (props) => {
   return Object.entries(props)
-    .filter(([key, value]) => key.trim().length > 0 && value !== undefined) // 기존 필터 유지
+    .filter(([key, value]) => key.trim().length > 0 && value !== undefined)
     .map(([key, value]) => {
-      if (isRgbaOrComplexString(value)) {
-        return `${key}: ${value.replace(/\s+/g, ' ').trim()}`; // 공백 정리하고 trim
+      const needsQuotes = key.includes(':') || key.includes('-') || key.includes(' ') || key.startsWith('@');
+      const formattedKey = needsQuotes ? `'${key}'` : key;
+
+      // rgba나 복잡한 문자열 값 처리
+      if (typeof value === 'string' && isRgbaOrComplexString(value)) {
+        return `${formattedKey}: ${value.replace(/\s+/g, ' ').trim()}`;
       }
 
+      // 값이 객체인 경우 (::placeholder 등)
+      if (typeof value === 'object' && value !== null) {
+        return `${formattedKey}: ${JSON.stringify(value, null, 2)}`;
+      }
+
+      // 일반적인 값 처리
       const cleanValue = typeof value === 'string' ? value.trim() : value;
-      return `${key.trim()}: ${cleanValue}`;
+      return `${formattedKey}: ${cleanValue}`;
     })
     .filter((prop) => prop.length > 0)
     .join(',\n    ');
@@ -128,14 +140,18 @@ const createTransformTemplate = ({ sourceCode, variables = [], sprinklesProps, r
   const sprinklesString = cleanPropsString(sprinklesProps);
   const remainingString = cleanPropsString(remainingProps);
 
-  if (variables.length > 0 || !isEmpty(remainingProps)) {
-    const elements = [
-      ...variables.map((v) => sourceCode.getText(v)),
-      `sprinkles({\n    ${sprinklesString}\n  })`,
-      ...(isEmpty(remainingProps) ? [] : [`{\n    ${remainingString}\n  }`]),
-    ];
+  const elements = [
+    ...variables.map((v) => sourceCode.getText(v)),
+    `sprinkles({\n    ${sprinklesString}\n  })`,
+    ...(isEmpty(remainingProps) ? [] : [`{\n    ${remainingString}\n  }`]),
+  ];
 
-    return isArrayContext ? `[\n  ${elements.join(',\n  ')}\n]` : `style([\n  ${elements.join(',\n  ')}\n])`;
+  if (isArrayContext) {
+    return `[\n  ${elements.join(',\n  ')}\n]`;
+  }
+
+  if (variables.length > 0 || !isEmpty(remainingProps)) {
+    return `style([\n  ${elements.join(',\n  ')}\n])`;
   }
 
   return `sprinkles({\n    ${sprinklesString}\n  })`;
@@ -206,6 +222,7 @@ module.exports = {
   isEmpty,
   isObject,
   isArray,
+  isStyleArray,
   isVariable,
   isSelector,
   hasSelectors,
