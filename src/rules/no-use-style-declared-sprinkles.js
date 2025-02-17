@@ -353,6 +353,21 @@ module.exports = {
                     },
                   });
                 }
+
+                const hasSprinklesOnly = targetArray.elements.length === 1 && targetArray.elements[0] === sprinklesCall;
+
+                if (hasSprinklesOnly) {
+                  context.report({
+                    node: baseProperty.value,
+                    messageId: 'useSprinkles',
+                    data: {
+                      property: 'array wrapper',
+                    },
+                    fix(fixer) {
+                      return fixer.replaceText(baseProperty.value, sourceCode.getText(sprinklesCall));
+                    },
+                  });
+                }
                 return;
               }
 
