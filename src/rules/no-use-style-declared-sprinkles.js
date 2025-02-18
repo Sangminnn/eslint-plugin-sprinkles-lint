@@ -426,56 +426,6 @@ module.exports = {
               }
             }
           }
-
-          /** variants in recipe */
-          const variantsProperty = recipeArgument.properties.find((prop) => prop.key.name === 'variants');
-
-          if (variantsProperty && isObject(variantsProperty.value)) {
-            // all object in variants check recursivly
-            const checkVariantStyles = (node) => {
-              if (!isObject(node)) return;
-
-              const { sprinklesProps, remainingProps } = separateProps({
-                sprinklesConfig,
-                shorthands,
-                properties: node.properties,
-                sourceCode,
-              });
-
-              if (!isEmpty(sprinklesProps)) {
-                context.report({
-                  node,
-                  messageId: 'useSprinkles',
-                  data: {
-                    property: Object.keys(sprinklesProps).join(', '),
-                  },
-                  fix(fixer) {
-                    return fixer.replaceText(
-                      node,
-                      createTransformTemplate({
-                        sourceCode,
-                        sprinklesProps,
-                        remainingProps,
-                      }),
-                    );
-                  },
-                });
-              }
-            };
-
-            const findAndCheckStyles = (node) => {
-              if (!node.properties) return;
-
-              node.properties.forEach((prop) => {
-                if (isObject(prop.value)) {
-                  checkVariantStyles(prop.value);
-                  findAndCheckStyles(prop.value);
-                }
-              });
-            };
-
-            findAndCheckStyles(variantsProperty.value);
-          }
         }
       },
     };

@@ -6,6 +6,8 @@ This Plugin does not support ESLint Flat Config yet.
 
 Shorthands also supported. 
 
+variants in recipe is not supported. because variants must be defined only style object
+
 if you use this plugin, i recommend this way.
 
 ### STEP 1. Split your config file
