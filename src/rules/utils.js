@@ -60,7 +60,7 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
 
 const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
   const sprinklesMap = new Map();
-  const remainingMap = new Map();
+  const remainingStyleMap = new Map();
 
   for (const prop of properties) {
     const propName = prop.key.name || prop.key.value;
@@ -68,17 +68,17 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
     const valueText = sourceCode.getText(propValue);
 
     // 이미 처리된 속성이면 스킵
-    if (sprinklesMap.has(propName) || remainingMap.has(propName)) {
+    if (sprinklesMap.has(propName) || remainingStyleMap.has(propName)) {
       continue;
     }
 
     if (isSelector(propName)) {
-      remainingMap.set(propName, valueText);
+      remainingStyleMap.set(propName, valueText);
       continue;
     }
 
     if (isVariable(propValue)) {
-      remainingMap.set(propName, valueText);
+      remainingStyleMap.set(propName, valueText);
       continue;
     }
 
@@ -94,12 +94,12 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
     if (isDefinedValue) {
       sprinklesMap.set(propName, valueText);
     } else {
-      remainingMap.set(propName, valueText);
+      remainingStyleMap.set(propName, valueText);
     }
   }
 
   const sprinklesProps = Object.fromEntries(sprinklesMap);
-  const remainingProps = Object.fromEntries(remainingMap);
+  const remainingProps = Object.fromEntries(remainingStyleMap);
 
   return {
     sprinklesProps,
