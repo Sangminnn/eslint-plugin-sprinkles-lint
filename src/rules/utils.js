@@ -67,7 +67,7 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
     const propValue = prop.value;
     const valueText = sourceCode.getText(propValue);
 
-    // 이미 처리된 속성이면 스킵
+    // skip for already processed prop
     if (sprinklesMap.has(propName) || remainingStyleMap.has(propName)) {
       continue;
     }
@@ -165,7 +165,6 @@ const findSprinklesCallInArray = (arrayNode) => {
 };
 
 const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, sprinklesProps, remainingProps }) => {
-  // sprinklesProps가 배열인 경우 (AST node 배열)
   const checkSprinklesProps = Array.isArray(sprinklesProps)
     ? sprinklesProps.every((prop) => {
         const propName = prop.key.name || prop.key.value;
@@ -187,11 +186,10 @@ const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, spri
         }),
       );
 
-  // remainingProps가 배열인 경우 (AST node 배열)
   const checkRemainingProps = Array.isArray(remainingProps)
     ? remainingProps.every((prop) => {
         const propName = prop.key.name || prop.key.value;
-        // selector나 variable인 경우는 remaining으로 간주
+        // selector or variable is considered as remaining
         if (isSelector(propName) || isVariable(prop.value)) {
           return true;
         }
@@ -203,7 +201,7 @@ const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, spri
           value,
         });
       })
-    : // remainingProps가 객체인 경우
+    : // when remainingProps is object
       Object.entries(remainingProps).every(([propName, value]) => {
         if (isSelector(propName)) {
           return true;
@@ -218,6 +216,7 @@ const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, spri
 
   return checkSprinklesProps && checkRemainingProps;
 };
+
 module.exports = {
   isEmpty,
   isObject,
