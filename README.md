@@ -4,9 +4,7 @@ An ESLint plugin that warns when declaring styles without using already defined 
 
 This Plugin does not support ESLint Flat Config yet.
 
-Shorthands also supported. 
-
-variants in recipe is not supported. because variants must be defined only style object
+Shorthands also supported.
 
 if you use this plugin, i recommend this way.
 
@@ -222,7 +220,7 @@ const testStyle = style([
 
 // remove style object and use sprinkles only
 const testStyle = sprinkles({
-  cursor: "pointer",
+  cursor: "pointer"
   backgroundColor: "red",
   marginTop: 1,
 });
