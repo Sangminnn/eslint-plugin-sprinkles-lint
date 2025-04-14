@@ -466,9 +466,10 @@ module.exports = {
             const findAndCheckStyles = (node) => {
               if (!node.properties) return;
 
+              checkVariantStyles(node);
+
               node.properties.forEach((prop) => {
                 if (isObject(prop.value)) {
-                  checkVariantStyles(prop.value);
                   findAndCheckStyles(prop.value);
                 }
               });
