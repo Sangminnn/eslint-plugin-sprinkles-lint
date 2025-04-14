@@ -17,7 +17,7 @@ const hasSelectors = (properties) => {
 };
 
 const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, value }) => {
-  if (shorthands && shorthands.includes(propName)) {
+  if (shorthands && Array.isArray(shorthands) && shorthands.includes(propName)) {
     return true;
   }
 
@@ -77,69 +77,78 @@ const findKeyByValue = (obj, valueToFind) => {
 };
 
 const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
-  const sprinklesMap = new Map();
-  const remainingStyleMap = new Map();
+  try {
+    const safeShorthands = shorthands && Array.isArray(shorthands) ? [...shorthands] : undefined;
 
-  for (const prop of properties) {
-    const propName = prop.key.name || prop.key.value;
-    const propValue = prop.value;
-    const valueText = sourceCode.getText(propValue);
+    const sprinklesMap = new Map();
+    const remainingStyleMap = new Map();
 
-    // skip for already processed prop
-    if (sprinklesMap.has(propName) || remainingStyleMap.has(propName)) {
-      continue;
-    }
+    for (const prop of properties) {
+      const propName = prop.key.name || prop.key.value;
+      const propValue = prop.value;
+      const valueText = sourceCode.getText(propValue);
 
-    if (isSelector(propName)) {
-      remainingStyleMap.set(propName, valueText);
-      continue;
-    }
+      // skip for already processed prop
+      if (sprinklesMap.has(propName) || remainingStyleMap.has(propName)) {
+        continue;
+      }
 
-    if (isVariable(propValue)) {
-      remainingStyleMap.set(propName, valueText);
-      continue;
-    }
+      if (isSelector(propName)) {
+        remainingStyleMap.set(propName, valueText);
+        continue;
+      }
 
-    const cleanValue = valueText.replace(/['"]/g, '');
+      if (isVariable(propValue)) {
+        remainingStyleMap.set(propName, valueText);
+        continue;
+      }
 
-    const isDefinedValue = checkDefinedValueInSprinkles({
-      sprinklesConfig,
-      shorthands,
-      propName,
-      value: cleanValue,
-    });
+      const cleanValue = valueText.replace(/['"]/g, '');
 
-    if (!isDefinedValue) {
-      remainingStyleMap.set(propName, valueText);
-      continue;
-    }
+      const isDefinedValue = checkDefinedValueInSprinkles({
+        sprinklesConfig,
+        shorthands: safeShorthands,
+        propName,
+        value: cleanValue,
+      });
 
-    const configForProp = sprinklesConfig[propName];
-    const isConfigForPropObject = typeof configForProp === 'object' && !Array.isArray(configForProp);
-    const isMatching = Object.keys(configForProp).includes(cleanValue);
+      if (!isDefinedValue) {
+        remainingStyleMap.set(propName, valueText);
+        continue;
+      }
 
-    if (!isConfigForPropObject || isMatching) {
+      const configForProp = sprinklesConfig[propName];
+      const isConfigForPropObject = typeof configForProp === 'object' && !Array.isArray(configForProp);
+      const isMatching = isConfigForPropObject ? Object.keys(configForProp).includes(cleanValue) : false;
+
+      if (!isConfigForPropObject || isMatching) {
+        sprinklesMap.set(propName, valueText);
+        continue;
+      }
+
+      // find key by value
+      const keyMatchingToValue = findKeyByValue(configForProp, cleanValue);
+      if (keyMatchingToValue) {
+        sprinklesMap.set(propName, `'${keyMatchingToValue}'`);
+        continue;
+      }
+
       sprinklesMap.set(propName, valueText);
-      continue;
     }
 
-    // find key by value
-    const keyMatchingToValue = findKeyByValue(configForProp, cleanValue);
-    if (keyMatchingToValue) {
-      sprinklesMap.set(propName, `'${keyMatchingToValue}'`);
-      continue;
-    }
+    const sprinklesProps = Object.fromEntries(sprinklesMap);
+    const remainingProps = Object.fromEntries(remainingStyleMap);
 
-    sprinklesMap.set(propName, valueText);
+    return {
+      sprinklesProps,
+      remainingProps,
+    };
+  } catch (error) {
+    return {
+      sprinklesProps: {},
+      remainingProps: {},
+    };
   }
-
-  const sprinklesProps = Object.fromEntries(sprinklesMap);
-  const remainingProps = Object.fromEntries(remainingStyleMap);
-
-  return {
-    sprinklesProps,
-    remainingProps,
-  };
 };
 
 const isRgbaOrComplexString = (value) => {
@@ -153,17 +162,17 @@ const cleanPropsString = (props) => {
       const needsQuotes = key.includes(':') || key.includes('-') || key.includes(' ') || key.startsWith('@');
       const formattedKey = needsQuotes ? `'${key}'` : key;
 
-      // rgba나 복잡한 문자열 값 처리
+      // rgba or complex string value
       if (typeof value === 'string' && isRgbaOrComplexString(value)) {
         return `${formattedKey}: ${value.replace(/\s+/g, ' ').trim()}`;
       }
 
-      // 값이 객체인 경우 (::placeholder 등)
+      // value is object (ex. ::placeholder)
       if (typeof value === 'object' && value !== null) {
         return `${formattedKey}: ${JSON.stringify(value, null, 2)}`;
       }
 
-      // 일반적인 값 처리
+      // normal value
       const cleanValue = typeof value === 'string' ? value.trim() : value;
       return `${formattedKey}: ${cleanValue}`;
     })
@@ -200,56 +209,62 @@ const findSprinklesCallInArray = (arrayNode) => {
 };
 
 const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, sprinklesProps, remainingProps }) => {
-  const checkSprinklesProps = Array.isArray(sprinklesProps)
-    ? sprinklesProps.every((prop) => {
-        const propName = prop.key.name || prop.key.value;
-        const value = sourceCode.getText(prop.value);
-        return checkDefinedValueInSprinkles({
-          sprinklesConfig,
-          shorthands,
-          propName,
-          value,
-        });
-      })
-    : // sprinklesProps가 객체인 경우
-      Object.entries(sprinklesProps).every(([propName, value]) =>
-        checkDefinedValueInSprinkles({
-          sprinklesConfig,
-          shorthands,
-          propName,
-          value,
-        }),
-      );
+  try {
+    const safeShorthands = shorthands && Array.isArray(shorthands) ? [...shorthands] : undefined;
 
-  const checkRemainingProps = Array.isArray(remainingProps)
-    ? remainingProps.every((prop) => {
-        const propName = prop.key.name || prop.key.value;
-        // selector or variable is considered as remaining
-        if (isSelector(propName) || isVariable(prop.value)) {
-          return true;
-        }
-        const value = sourceCode.getText(prop.value);
-        return !checkDefinedValueInSprinkles({
-          sprinklesConfig,
-          shorthands,
-          propName,
-          value,
-        });
-      })
-    : // when remainingProps is object
-      Object.entries(remainingProps).every(([propName, value]) => {
-        if (isSelector(propName)) {
-          return true;
-        }
-        return !checkDefinedValueInSprinkles({
-          sprinklesConfig,
-          shorthands,
-          propName,
-          value,
-        });
-      });
+    const checkSprinklesProps = Array.isArray(sprinklesProps)
+      ? sprinklesProps.every((prop) => {
+          const propName = prop.key.name || prop.key.value;
+          const value = sourceCode.getText(prop.value);
+          return checkDefinedValueInSprinkles({
+            sprinklesConfig,
+            shorthands: safeShorthands,
+            propName,
+            value,
+          });
+        })
+      : // when sprinklesProps is object
+        Object.entries(sprinklesProps).every(([propName, value]) =>
+          checkDefinedValueInSprinkles({
+            sprinklesConfig,
+            shorthands: safeShorthands,
+            propName,
+            value,
+          }),
+        );
 
-  return checkSprinklesProps && checkRemainingProps;
+    const checkRemainingProps = Array.isArray(remainingProps)
+      ? remainingProps.every((prop) => {
+          const propName = prop.key.name || prop.key.value;
+          // selector or variable is considered as remaining
+          if (isSelector(propName) || isVariable(prop.value)) {
+            return true;
+          }
+          const value = sourceCode.getText(prop.value);
+          return !checkDefinedValueInSprinkles({
+            sprinklesConfig,
+            shorthands: safeShorthands,
+            propName,
+            value,
+          });
+        })
+      : // when remainingProps is object
+        Object.entries(remainingProps).every(([propName, value]) => {
+          if (isSelector(propName)) {
+            return true;
+          }
+          return !checkDefinedValueInSprinkles({
+            sprinklesConfig,
+            shorthands: safeShorthands,
+            propName,
+            value,
+          });
+        });
+
+    return checkSprinklesProps && checkRemainingProps;
+  } catch (error) {
+    return false;
+  }
 };
 
 module.exports = {

@@ -81,41 +81,45 @@ module.exports = {
 
           // Case. style({})
           if (isObject(styleArgument)) {
-            const { sprinklesProps, remainingProps } = separateProps({
-              sprinklesConfig,
-              shorthands,
-              properties: styleArgument.properties,
-              sourceCode,
-            });
+            try {
+              const { sprinklesProps, remainingProps } = separateProps({
+                sprinklesConfig,
+                shorthands: shorthands ? [...shorthands] : undefined,
+                properties: styleArgument.properties,
+                sourceCode,
+              });
 
-            if (isEmpty(sprinklesProps)) {
-              return;
+              if (isEmpty(sprinklesProps)) {
+                return;
+              }
+
+              const targetProperties = Object.keys(sprinklesProps).join(', ');
+
+              context.report({
+                node: styleArgument,
+                messageId: 'useSprinkles',
+                data: {
+                  property: targetProperties,
+                },
+                fix(fixer) {
+                  if (isEmpty(remainingProps)) {
+                    // return sprinkles only template
+                    return fixer.replaceText(node, `sprinkles(${sourceCode.getText(styleArgument)})`);
+                  }
+
+                  return fixer.replaceText(
+                    node,
+                    createTransformTemplate({
+                      sourceCode,
+                      sprinklesProps,
+                      remainingProps,
+                    }),
+                  );
+                },
+              });
+            } catch (error) {
+              // 에러 발생 시 계속 진행
             }
-
-            const targetProperties = Object.keys(sprinklesProps).join(', ');
-
-            context.report({
-              node: styleArgument,
-              messageId: 'useSprinkles',
-              data: {
-                property: targetProperties,
-              },
-              fix(fixer) {
-                if (isEmpty(remainingProps)) {
-                  // return sprinkles only template
-                  return fixer.replaceText(node, `sprinkles(${sourceCode.getText(styleArgument)})`);
-                }
-
-                return fixer.replaceText(
-                  node,
-                  createTransformTemplate({
-                    sourceCode,
-                    sprinklesProps,
-                    remainingProps,
-                  }),
-                );
-              },
-            });
           }
 
           // Case. style([])
@@ -132,84 +136,92 @@ module.exports = {
               const sprinklesProperties = sprinklesCall?.arguments?.[0]?.properties || [];
               const nonSprinklesProperties = nonSprinklesObject?.properties || [];
 
-              const isSeparatedCorrectly = checkSeparatedCorrectly({
-                sprinklesConfig,
-                shorthands,
-                sourceCode,
-                sprinklesProps: sprinklesProperties,
-                remainingProps: nonSprinklesProperties,
-              });
+              try {
+                const isSeparatedCorrectly = checkSeparatedCorrectly({
+                  sprinklesConfig,
+                  shorthands: shorthands ? [...shorthands] : undefined,
+                  sourceCode,
+                  sprinklesProps: sprinklesProperties,
+                  remainingProps: nonSprinklesProperties,
+                });
 
-              // if sprinkles and nonSprinkles are separated correctly, return instantly
-              if (isSeparatedCorrectly) {
-                const hasSprinklesOnly = styleArgument.elements.length === 1 && styleArgument.elements[0] === sprinklesCall;
-                if (hasSprinklesOnly) {
-                  context.report({
-                    node,
-                    messageId: 'removeStyle',
-                    fix(fixer) {
-                      return fixer.replaceText(node, sourceCode.getText(sprinklesCall));
-                    },
-                  });
+                // if sprinkles and nonSprinkles are separated correctly, return instantly
+                if (isSeparatedCorrectly) {
+                  const hasSprinklesOnly = styleArgument.elements.length === 1 && styleArgument.elements[0] === sprinklesCall;
+                  if (hasSprinklesOnly) {
+                    context.report({
+                      node,
+                      messageId: 'removeStyle',
+                      fix(fixer) {
+                        return fixer.replaceText(node, sourceCode.getText(sprinklesCall));
+                      },
+                    });
+                  }
+
+                  return;
                 }
-
-                return;
+              } catch (error) {
+                // 에러 발생 시 계속 진행
               }
 
               const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];
 
-              const { sprinklesProps, remainingProps } = separateProps({
-                sprinklesConfig,
-                shorthands,
-                properties: allProperties,
-                sourceCode,
-              });
+              try {
+                const { sprinklesProps, remainingProps } = separateProps({
+                  sprinklesConfig,
+                  shorthands: shorthands ? [...shorthands] : undefined,
+                  properties: allProperties,
+                  sourceCode,
+                });
 
-              if (isEmpty(sprinklesProps)) {
-                const formattedRemainingProps = Object.entries(remainingProps)
-                  .map(([key, value]) => `${key}: ${value}`)
-                  .join(',\n  ');
+                if (isEmpty(sprinklesProps)) {
+                  const formattedRemainingProps = Object.entries(remainingProps)
+                    .map(([key, value]) => `${key}: ${value}`)
+                    .join(',\n  ');
+
+                  context.report({
+                    node,
+                    messageId: 'useSprinkles',
+                    data: {
+                      property: 'all',
+                    },
+                    fix(fixer) {
+                      if (variables.length > 0) {
+                        return fixer.replaceText(node, `style({\n  ${formattedRemainingProps}\n})`);
+                      } else {
+                        return fixer.replaceText(
+                          node,
+                          `style([${variables.map((el) => sourceCode.getText(el)).join(', ')}, ${formattedRemainingProps}])`,
+                        );
+                      }
+                    },
+                  });
+                  return;
+                }
+
+                const targetProperties = Object.keys(sprinklesProps).join(', ');
 
                 context.report({
                   node,
                   messageId: 'useSprinkles',
                   data: {
-                    property: 'all',
+                    property: targetProperties,
                   },
                   fix(fixer) {
-                    if (variables.length > 0) {
-                      return fixer.replaceText(node, `style({\n  ${formattedRemainingProps}\n})`);
-                    } else {
-                      return fixer.replaceText(
-                        node,
-                        `style([${variables.map((el) => sourceCode.getText(el)).join(', ')}, ${formattedRemainingProps}])`,
-                      );
-                    }
+                    return fixer.replaceText(
+                      node,
+                      createTransformTemplate({
+                        sourceCode,
+                        variables,
+                        sprinklesProps,
+                        remainingProps,
+                      }),
+                    );
                   },
                 });
-                return;
+              } catch (error) {
+                // 에러 발생 시 계속 진행
               }
-
-              const targetProperties = Object.keys(sprinklesProps).join(', ');
-
-              context.report({
-                node,
-                messageId: 'useSprinkles',
-                data: {
-                  property: targetProperties,
-                },
-                fix(fixer) {
-                  return fixer.replaceText(
-                    node,
-                    createTransformTemplate({
-                      sourceCode,
-                      variables,
-                      sprinklesProps,
-                      remainingProps,
-                    }),
-                  );
-                },
-              });
               return;
             }
 
@@ -220,37 +232,41 @@ module.exports = {
                   return;
                 }
 
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands,
-                  properties: element.properties,
-                  sourceCode,
-                });
+                try {
+                  const { sprinklesProps, remainingProps } = separateProps({
+                    sprinklesConfig,
+                    shorthands: shorthands ? [...shorthands] : undefined,
+                    properties: element.properties,
+                    sourceCode,
+                  });
 
-                if (isEmpty(sprinklesProps)) {
-                  return;
+                  if (isEmpty(sprinklesProps)) {
+                    return;
+                  }
+
+                  const targetProperties = Object.keys(sprinklesProps).join(', ');
+
+                  context.report({
+                    node: element,
+                    messageId: 'useSprinkles',
+                    data: {
+                      property: targetProperties,
+                    },
+                    fix(fixer) {
+                      return fixer.replaceText(
+                        element,
+                        createTransformTemplate({
+                          sourceCode,
+                          variables,
+                          sprinklesProps,
+                          remainingProps,
+                        }),
+                      );
+                    },
+                  });
+                } catch (error) {
+                  // 에러 발생 시 계속 진행
                 }
-
-                const targetProperties = Object.keys(sprinklesProps).join(', ');
-
-                context.report({
-                  node: element,
-                  messageId: 'useSprinkles',
-                  data: {
-                    property: targetProperties,
-                  },
-                  fix(fixer) {
-                    return fixer.replaceText(
-                      element,
-                      createTransformTemplate({
-                        sourceCode,
-                        variables,
-                        sprinklesProps,
-                        remainingProps,
-                      }),
-                    );
-                  },
-                });
               });
             }
           }
@@ -285,88 +301,37 @@ module.exports = {
               const styleObject = targetArray.elements.find((element) => isObject(element));
 
               if (!sprinklesCall && styleObject) {
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands,
-                  properties: styleObject.properties,
-                  sourceCode,
-                });
-
-                if (!isEmpty(sprinklesProps)) {
-                  context.report({
-                    node: styleObject,
-                    messageId: 'useSprinkles',
-                    data: {
-                      property: Object.keys(sprinklesProps).join(', '),
-                    },
-                    fix(fixer) {
-                      return fixer.replaceText(
-                        baseProperty.value,
-                        createTransformTemplate({
-                          sourceCode,
-                          variables,
-                          sprinklesProps,
-                          remainingProps,
-                          isArrayContext: true,
-                        }),
-                      );
-                    },
+                try {
+                  const { sprinklesProps, remainingProps } = separateProps({
+                    sprinklesConfig,
+                    shorthands: shorthands ? [...shorthands] : undefined,
+                    properties: styleObject.properties,
+                    sourceCode,
                   });
-                }
-                return;
-              }
 
-              if (!sprinklesCall) return;
-
-              const isEmptySprinkles = !sprinklesCall.arguments?.[0];
-              if (isEmptySprinkles) return;
-
-              const isEmptyStyleObject = !styleObject || styleObject.properties.length === 0;
-              const sprinklesProperties = sprinklesCall.arguments[0].properties;
-              const remainingProperties = styleObject?.properties || [];
-
-              const isSeparatedCorrectly = checkSeparatedCorrectly({
-                sprinklesConfig,
-                shorthands,
-                sourceCode,
-                sprinklesProps: sprinklesProperties,
-                remainingProps: remainingProperties,
-              });
-
-              const isWrappedInStyle = baseProperty.value.type === 'CallExpression' && baseProperty.value.callee.name === 'style';
-
-              if (isSeparatedCorrectly) {
-                if (isWrappedInStyle) {
-                  context.report({
-                    node: baseProperty.value,
-                    messageId: 'removeStyle',
-                    data: {
-                      property: 'style wrapper',
-                    },
-                    fix(fixer) {
-                      const currentText = sourceCode.getText(baseProperty.value);
-                      const match = currentText.match(/style\(\[([\s\S]*?)\]\)/);
-                      if (!match) return null;
-
-                      const arrayContent = match[1];
-                      return fixer.replaceText(baseProperty.value, `[${arrayContent}]`);
-                    },
-                  });
-                }
-
-                const hasSprinklesOnly = targetArray.elements.length === 1 && targetArray.elements[0] === sprinklesCall;
-
-                if (hasSprinklesOnly) {
-                  context.report({
-                    node: baseProperty.value,
-                    messageId: 'useSprinkles',
-                    data: {
-                      property: 'array wrapper',
-                    },
-                    fix(fixer) {
-                      return fixer.replaceText(baseProperty.value, sourceCode.getText(sprinklesCall));
-                    },
-                  });
+                  if (!isEmpty(sprinklesProps)) {
+                    context.report({
+                      node: styleObject,
+                      messageId: 'useSprinkles',
+                      data: {
+                        property: Object.keys(sprinklesProps).join(', '),
+                      },
+                      fix(fixer) {
+                        return fixer.replaceText(
+                          baseProperty.value,
+                          createTransformTemplate({
+                            sourceCode,
+                            variables,
+                            sprinklesProps,
+                            remainingProps,
+                            isArrayContext: true,
+                          }),
+                        );
+                      },
+                    });
+                  }
+                } catch (error) {
+                  // 에러 발생 시 계속 진행
                 }
                 return;
               }
@@ -389,40 +354,75 @@ module.exports = {
                 return;
               }
 
-              const allProperties = [...sprinklesProperties, ...remainingProperties];
-              const { sprinklesProps, remainingProps } = separateProps({
-                sprinklesConfig,
-                shorthands,
-                properties: allProperties,
-                sourceCode,
-              });
+              const sprinklesProperties = sprinklesCall.arguments[0].properties;
+              const remainingProperties = styleObject?.properties || [];
 
-              const targetProperties = Object.keys(sprinklesProps).join(', ');
-
-              if (!isEmpty(sprinklesProps)) {
-                context.report({
-                  node: baseProperty.value,
-                  messageId: 'useSprinkles',
-                  data: {
-                    property: targetProperties,
-                  },
-                  fix(fixer) {
-                    if (styleObject.properties.length === 0 && variables.length === 0) {
-                      return fixer.replaceText(baseProperty.value, sourceCode.getText(sprinklesCall));
-                    }
-
-                    return fixer.replaceText(
-                      baseProperty.value,
-                      createTransformTemplate({
-                        sourceCode,
-                        variables,
-                        sprinklesProps,
-                        remainingProps,
-                        isArrayContext: true,
-                      }),
-                    );
-                  },
+              try {
+                const isSeparatedCorrectly = checkSeparatedCorrectly({
+                  sprinklesConfig,
+                  shorthands: shorthands ? [...shorthands] : undefined,
+                  sourceCode,
+                  sprinklesProps: sprinklesProperties,
+                  remainingProps: remainingProperties,
                 });
+
+                // if sprinkles and nonSprinkles are separated correctly, return instantly
+                if (isSeparatedCorrectly) {
+                  const hasSprinklesOnly = styleArgument.elements.length === 1 && styleArgument.elements[0] === sprinklesCall;
+                  if (hasSprinklesOnly) {
+                    context.report({
+                      node,
+                      messageId: 'removeStyle',
+                      fix(fixer) {
+                        return fixer.replaceText(node, sourceCode.getText(sprinklesCall));
+                      },
+                    });
+                  }
+
+                  return;
+                }
+              } catch (error) {
+                // 에러 발생 시 계속 진행
+              }
+
+              const allProperties = [...sprinklesProperties, ...remainingProperties];
+              try {
+                const { sprinklesProps, remainingProps } = separateProps({
+                  sprinklesConfig,
+                  shorthands: shorthands ? [...shorthands] : undefined,
+                  properties: allProperties,
+                  sourceCode,
+                });
+
+                const targetProperties = Object.keys(sprinklesProps).join(', ');
+
+                if (!isEmpty(sprinklesProps)) {
+                  context.report({
+                    node: baseProperty.value,
+                    messageId: 'useSprinkles',
+                    data: {
+                      property: targetProperties,
+                    },
+                    fix(fixer) {
+                      if (styleObject.properties.length === 0 && variables.length === 0) {
+                        return fixer.replaceText(baseProperty.value, sourceCode.getText(sprinklesCall));
+                      }
+
+                      return fixer.replaceText(
+                        baseProperty.value,
+                        createTransformTemplate({
+                          sourceCode,
+                          variables,
+                          sprinklesProps,
+                          remainingProps,
+                          isArrayContext: true,
+                        }),
+                      );
+                    },
+                  });
+                }
+              } catch (error) {
+                // 에러 발생 시 계속 진행
               }
             }
           }
@@ -435,31 +435,35 @@ module.exports = {
             const checkVariantStyles = (node) => {
               if (!isObject(node)) return;
 
-              const { sprinklesProps, remainingProps } = separateProps({
-                sprinklesConfig,
-                shorthands,
-                properties: node.properties,
-                sourceCode,
-              });
-
-              if (!isEmpty(sprinklesProps)) {
-                context.report({
-                  node,
-                  messageId: 'useSprinkles',
-                  data: {
-                    property: Object.keys(sprinklesProps).join(', '),
-                  },
-                  fix(fixer) {
-                    return fixer.replaceText(
-                      node,
-                      createTransformTemplate({
-                        sourceCode,
-                        sprinklesProps,
-                        remainingProps,
-                      }),
-                    );
-                  },
+              try {
+                const { sprinklesProps, remainingProps } = separateProps({
+                  sprinklesConfig,
+                  shorthands: shorthands ? [...shorthands] : undefined,
+                  properties: node.properties,
+                  sourceCode,
                 });
+
+                if (!isEmpty(sprinklesProps)) {
+                  context.report({
+                    node,
+                    messageId: 'useSprinkles',
+                    data: {
+                      property: Object.keys(sprinklesProps).join(', '),
+                    },
+                    fix(fixer) {
+                      return fixer.replaceText(
+                        node,
+                        createTransformTemplate({
+                          sourceCode,
+                          sprinklesProps,
+                          remainingProps,
+                        }),
+                      );
+                    },
+                  });
+                }
+              } catch (error) {
+                // 에러 발생 시 계속 진행
               }
             };
 
