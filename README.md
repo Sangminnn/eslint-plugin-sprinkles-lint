@@ -6,6 +6,33 @@ This Plugin does not support ESLint Flat Config yet.
 
 Shorthands also supported.
 
+and If you're directly using values that exist in your sprinkles config, this lint rule will automatically convert them to their corresponding sprinkles keys.
+
+```js
+// ex
+
+const sprinklesConfig = {
+  color: {
+    'gray-100': '#fafafa',
+    'gray-200': '#f0f0f0',
+    // .. 
+  }
+}
+
+// as-is
+const yourStyleAsIs = style({
+  color: '#fafafa'
+})
+
+// to-be
+const yourStyleToBe = sprinkles({
+  color: 'gray-100'
+})
+```
+
+
+# Guide
+
 if you use this plugin, i recommend this way.
 
 ### STEP 1. Split your config file
@@ -300,4 +327,23 @@ const testStyle2 = recipe({
     cursor: "pointer",
   }),
 });
+```
+
+### Case 7 - Using style value in sprinkles not key
+
+```js
+const testStyle3 = style([
+  sprinkles({
+    // etc ...
+  }),
+  {
+    color: '#fafafa' // you have '#fafafa' in sprinkles, and that is 'gray-100' (gray-100: #fafafa)
+  }
+])
+
+// to-be
+const testStyle3 = sprinkles({
+  // etc ...
+  color: 'gray-100' // auto transform and remove empty style object
+})
 ```

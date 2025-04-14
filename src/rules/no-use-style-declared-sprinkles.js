@@ -118,7 +118,7 @@ module.exports = {
                 },
               });
             } catch (error) {
-              // 에러 발생 시 계속 진행
+              // if error, continue
             }
           }
 
@@ -161,7 +161,7 @@ module.exports = {
                   return;
                 }
               } catch (error) {
-                // 에러 발생 시 계속 진행
+                // if error, continue
               }
 
               const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];
@@ -220,7 +220,7 @@ module.exports = {
                   },
                 });
               } catch (error) {
-                // 에러 발생 시 계속 진행
+                // if error, continue
               }
               return;
             }
@@ -265,7 +265,7 @@ module.exports = {
                     },
                   });
                 } catch (error) {
-                  // 에러 발생 시 계속 진행
+                  // if error, continue
                 }
               });
             }
@@ -331,7 +331,7 @@ module.exports = {
                     });
                   }
                 } catch (error) {
-                  // 에러 발생 시 계속 진행
+                  // if error, continue
                 }
                 return;
               }
@@ -382,7 +382,7 @@ module.exports = {
                   return;
                 }
               } catch (error) {
-                // 에러 발생 시 계속 진행
+                // if error, continue
               }
 
               const allProperties = [...sprinklesProperties, ...remainingProperties];
@@ -422,7 +422,7 @@ module.exports = {
                   });
                 }
               } catch (error) {
-                // 에러 발생 시 계속 진행
+                // if error, continue
               }
             }
           }
@@ -463,7 +463,7 @@ module.exports = {
                   });
                 }
               } catch (error) {
-                // 에러 발생 시 계속 진행
+                // if error, continue
               }
             };
 
