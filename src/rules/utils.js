@@ -52,10 +52,28 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
    */
   if (typeof configValue === 'object' && configValue !== null) {
     // check key is included in configValue keys
-    return Object.keys(configValue).includes(cleanValue);
+    // return Object.keys(configValue).includes(cleanValue);
+
+    const keys = Object.keys(configValue);
+    if (keys.includes(cleanValue)) return true;
+
+    const values = Object.values(configValue);
+    return values.some((v) => v === cleanValue);
   }
 
   return false;
+};
+
+const findKeyByValue = (obj, valueToFind) => {
+  const cleanValueToFind = String(valueToFind).replace(/['"]/g, '').trim();
+
+  for (const [key, value] of Object.entries(obj)) {
+    const cleanValue = String(value).replace(/['"]/g, '').trim();
+    if (cleanValue === cleanValueToFind) {
+      return key;
+    }
+  }
+  return null;
 };
 
 const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) => {
@@ -91,11 +109,28 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
       value: cleanValue,
     });
 
-    if (isDefinedValue) {
-      sprinklesMap.set(propName, valueText);
-    } else {
+    if (!isDefinedValue) {
       remainingStyleMap.set(propName, valueText);
+      continue;
     }
+
+    const configForProp = sprinklesConfig[propName];
+    const isConfigForPropObject = typeof configForProp === 'object' && !Array.isArray(configForProp);
+    const isMatching = Object.keys(configForProp).includes(cleanValue);
+
+    if (!isConfigForPropObject || isMatching) {
+      sprinklesMap.set(propName, valueText);
+      continue;
+    }
+
+    // find key by value
+    const keyMatchingToValue = findKeyByValue(configForProp, cleanValue);
+    if (keyMatchingToValue) {
+      sprinklesMap.set(propName, `'${keyMatchingToValue}'`);
+      continue;
+    }
+
+    sprinklesMap.set(propName, valueText);
   }
 
   const sprinklesProps = Object.fromEntries(sprinklesMap);
