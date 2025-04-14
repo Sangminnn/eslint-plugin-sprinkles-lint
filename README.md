@@ -120,7 +120,7 @@ exportConfig().catch(console.error);
 
 ### STEP 3. Run script to export sprinkles.config.js to your .eslintrc.sprinkles.js. With [tsx](https://www.npmjs.com/package/tsx), you can run ESM script in Node.js
 
-```json
+```js
 // package.json
 
 "export-sprinkles": "tsx scripts/exportSprinklesConfig.ts",
