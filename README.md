@@ -247,7 +247,7 @@ const testStyle = style([
 
 // remove style object and use sprinkles only
 const testStyle = sprinkles({
-  cursor: "pointer"
+  cursor: "pointer",
   backgroundColor: "red",
   marginTop: 1,
 });
@@ -273,7 +273,9 @@ const testStyle = recipe({
     backgroundColor: "red",
   }),
   variants: {
-    cursor: "pointer",
+    true: sprinkles({
+      cursor: "pointer",
+    })
   },
 });
 ```
@@ -298,7 +300,9 @@ const testStyle2 = recipe({
     backgroundColor: "red",
   }),
   variants: {
-    cursor: "pointer",
+    true: sprinkles({
+      cursor: "pointer",
+    })
   },
 });
 ```
@@ -314,7 +318,9 @@ const testStyle2 = recipe({
 
   }],
   variants: {
-    cursor: "pointer"
+    true: sprinkles({
+      cursor: "pointer",
+    })
   },
 });
 // to-be
@@ -323,9 +329,11 @@ const testStyle2 = recipe({
   base: sprinkles({
     backgroundColor: "red",
   }),
-  variants: sprinkles({
-    cursor: "pointer",
-  }),
+  variants: {
+    true: sprinkles({
+      cursor: "pointer",
+    })
+  },
 });
 ```
 
