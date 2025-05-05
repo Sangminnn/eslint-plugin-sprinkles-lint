@@ -22,6 +22,10 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
   }
 
   const configValue = sprinklesConfig[propName];
+  if (!configValue) {
+    return false;
+  }
+
   const cleanValue = typeof value === 'number' ? value : value.replace(/['"]/g, '').trim();
 
   /**
@@ -35,8 +39,16 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
    * ]
    */
   if (Array.isArray(configValue)) {
-    // check value is included in configValue
-    return configValue.includes(Number(cleanValue)) || configValue.includes(cleanValue);
+    let isIncluded = configValue.includes(cleanValue);
+    if (!isIncluded && !isNaN(Number(cleanValue))) {
+      isIncluded = configValue.includes(Number(cleanValue));
+    }
+
+    if (!isIncluded && typeof cleanValue === 'string') {
+      isIncluded = configValue.some((item) => typeof item === 'string' && item.toLowerCase() === cleanValue.toLowerCase());
+    }
+
+    return isIncluded;
   }
 
   /**
@@ -51,14 +63,15 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
    * }
    */
   if (typeof configValue === 'object' && configValue !== null) {
-    // check key is included in configValue keys
-    // return Object.keys(configValue).includes(cleanValue);
-
     const keys = Object.keys(configValue);
-    if (keys.includes(cleanValue)) return true;
+    const keyIncluded = keys.includes(cleanValue);
+    if (keyIncluded) return true;
 
     const values = Object.values(configValue);
-    return values.some((v) => v === cleanValue);
+    const valuesAsString = values.map((v) => String(v).trim());
+    const valueIncluded = valuesAsString.includes(String(cleanValue).trim());
+
+    return valueIncluded;
   }
 
   return false;
@@ -201,11 +214,12 @@ const createTransformTemplate = ({ sourceCode, variables = [], sprinklesProps, r
   return `sprinkles({\n    ${sprinklesString}\n  })`;
 };
 
+const isSprinklesCall = (node) => {
+  return node?.type === 'CallExpression' && node.callee.name === 'sprinkles';
+};
+
 const findSprinklesCallInArray = (arrayNode) => {
-  return arrayNode.elements.find(
-    (element) =>
-      element?.type === 'CallExpression' && element.callee.name === 'sprinkles' && element.arguments?.[0]?.type === 'ObjectExpression',
-  );
+  return arrayNode.elements.find((element) => isSprinklesCall(element) && element.arguments?.[0]?.type === 'ObjectExpression');
 };
 
 const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, sprinklesProps, remainingProps }) => {
@@ -216,22 +230,24 @@ const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, spri
       ? sprinklesProps.every((prop) => {
           const propName = prop.key.name || prop.key.value;
           const value = sourceCode.getText(prop.value);
-          return checkDefinedValueInSprinkles({
+          const isDefinedInSprinkles = checkDefinedValueInSprinkles({
             sprinklesConfig,
             shorthands: safeShorthands,
             propName,
             value,
           });
+          return isDefinedInSprinkles;
         })
       : // when sprinklesProps is object
-        Object.entries(sprinklesProps).every(([propName, value]) =>
-          checkDefinedValueInSprinkles({
+        Object.entries(sprinklesProps).every(([propName, value]) => {
+          const isDefinedInSprinkles = checkDefinedValueInSprinkles({
             sprinklesConfig,
             shorthands: safeShorthands,
             propName,
             value,
-          }),
-        );
+          });
+          return isDefinedInSprinkles;
+        });
 
     const checkRemainingProps = Array.isArray(remainingProps)
       ? remainingProps.every((prop) => {
@@ -241,30 +257,49 @@ const checkSeparatedCorrectly = ({ sprinklesConfig, shorthands, sourceCode, spri
             return true;
           }
           const value = sourceCode.getText(prop.value);
-          return !checkDefinedValueInSprinkles({
+          const isDefinedInSprinkles = checkDefinedValueInSprinkles({
             sprinklesConfig,
             shorthands: safeShorthands,
             propName,
             value,
           });
+          return !isDefinedInSprinkles;
         })
       : // when remainingProps is object
         Object.entries(remainingProps).every(([propName, value]) => {
           if (isSelector(propName)) {
             return true;
           }
-          return !checkDefinedValueInSprinkles({
+          const isDefinedInSprinkles = checkDefinedValueInSprinkles({
             sprinklesConfig,
             shorthands: safeShorthands,
             propName,
             value,
           });
+          return !isDefinedInSprinkles;
         });
 
     return checkSprinklesProps && checkRemainingProps;
   } catch (error) {
     return false;
   }
+};
+
+const hasNestedSelectors = (properties) => {
+  if (!properties) return false;
+
+  return properties.some((prop) => {
+    const propName = prop.key.name || prop.key.value;
+    if (isSelector(propName)) {
+      return true;
+    }
+
+    if (isObject(prop.value) && prop.value.properties) {
+      return hasNestedSelectors(prop.value.properties);
+    }
+
+    return false;
+  });
 };
 
 module.exports = {
@@ -277,6 +312,10 @@ module.exports = {
   hasSelectors,
   separateProps,
   createTransformTemplate,
+  isSprinklesCall,
   findSprinklesCallInArray,
   checkSeparatedCorrectly,
+  cleanPropsString,
+  checkDefinedValueInSprinkles,
+  hasNestedSelectors,
 };
