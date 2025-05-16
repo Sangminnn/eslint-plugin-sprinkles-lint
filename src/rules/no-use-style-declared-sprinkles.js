@@ -746,7 +746,31 @@ module.exports = {
                       remainingProps: allStyleProps,
                     });
 
+                    // Skip further checks if already properly separated
                     if (isSeparatedCorrectly) return;
+
+                    // Additional check to avoid false positives
+                    // If all sprinkles properties are already in sprinklesCall, we should skip
+                    if (sprinklesProperties.length > 0) {
+                      let hasUnseparatedSprinklesProperty = false;
+
+                      for (const prop of allStyleProps) {
+                        const propName = prop.key.name || prop.key.value;
+                        const isDefinedInSprinkles = checkDefinedValueInSprinkles({
+                          sprinklesConfig,
+                          shorthands: shorthands ? [...shorthands] : undefined,
+                          propName,
+                          value: sourceCode.getText(prop.value),
+                        });
+
+                        if (isDefinedInSprinkles) {
+                          hasUnseparatedSprinklesProperty = true;
+                          break;
+                        }
+                      }
+
+                      if (!hasUnseparatedSprinklesProperty) return;
+                    }
                   } catch (error) {
                     // Continue if error occurs
                   }
@@ -777,6 +801,20 @@ module.exports = {
                   });
 
                   if (isEmpty(sprinklesProps)) return;
+
+                  // Check if all sprinkles properties are already in sprinklesCall
+                  if (sprinklesCall) {
+                    const existingSprinklesProps = sprinklesCall.arguments[0].properties || [];
+                    const existingSprinklesPropNames = existingSprinklesProps.map((prop) => prop.key.name || prop.key.value);
+
+                    // Check if all sprinklesProps are already in existingSprinklesProps
+                    const hasNewSprinklesProps = Object.keys(sprinklesProps).some(
+                      (propName) => !existingSprinklesPropNames.includes(propName),
+                    );
+
+                    // If no new sprinkles properties need to be added, don't report
+                    if (!hasNewSprinklesProps) return;
+                  }
 
                   context.report({
                     node: variantValue,
