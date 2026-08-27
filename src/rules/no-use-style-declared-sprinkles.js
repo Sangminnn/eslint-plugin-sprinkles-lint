@@ -14,6 +14,7 @@ const {
   checkSeparatedCorrectly,
   hasNestedSelectors,
 } = require('./utils');
+const { getSprinklesConfig } = require('./sprinkles-discovery');
 
 module.exports = {
   meta: {
@@ -70,10 +71,23 @@ module.exports = {
 
   create(context) {
     const options = context.options[0] || {};
-    const configPath = options.configPath;
-    const { properties: sprinklesConfig, shorthands } = require(path.resolve(process.cwd(), configPath));
+    const config = getSprinklesConfig(options);
+
+    if (!config) {
+      // If no config found, skip processing
+      return {};
+    }
+
+    const { sprinklesConfig, shorthands } = config;
 
     const sourceCode = context.getSourceCode();
+    const separateWithConfig = (properties) =>
+      separateProps({
+        sprinklesConfig,
+        shorthands: shorthands ? [...shorthands] : undefined,
+        properties,
+        sourceCode,
+      });
 
     return {
       CallExpression(node) {
@@ -85,12 +99,7 @@ module.exports = {
           // Case. style({})
           if (isObject(styleArgument)) {
             try {
-              const { sprinklesProps, remainingProps } = separateProps({
-                sprinklesConfig,
-                shorthands: shorthands ? [...shorthands] : undefined,
-                properties: styleArgument.properties,
-                sourceCode,
-              });
+              const { sprinklesProps, remainingProps} = separateWithConfig(styleArgument.properties);
 
               if (isEmpty(sprinklesProps)) {
                 return;
@@ -170,12 +179,7 @@ module.exports = {
               const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];
 
               try {
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: allProperties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                 if (isEmpty(sprinklesProps)) {
                   const formattedRemainingProps = Object.entries(remainingProps)
@@ -236,12 +240,7 @@ module.exports = {
                 }
 
                 try {
-                  const { sprinklesProps, remainingProps } = separateProps({
-                    sprinklesConfig,
-                    shorthands: shorthands ? [...shorthands] : undefined,
-                    properties: element.properties,
-                    sourceCode,
-                  });
+                  const { sprinklesProps, remainingProps } = separateWithConfig(element.properties);
 
                   if (isEmpty(sprinklesProps)) {
                     return;
@@ -369,12 +368,7 @@ module.exports = {
                   }
                 }
 
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: allProperties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                 if (!isEmpty(sprinklesProps)) {
                   const targetProperties = Object.keys(sprinklesProps).join(', ');
@@ -434,12 +428,7 @@ module.exports = {
 
                 if (!hasDefinedSprinklesProps) return;
 
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: valueNode.properties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(valueNode.properties);
 
                 if (isEmpty(sprinklesProps)) return;
 
@@ -523,12 +512,7 @@ module.exports = {
               if (allProperties.length === 0) return;
 
               try {
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: allProperties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                 if (isEmpty(sprinklesProps)) return;
 
@@ -586,12 +570,7 @@ module.exports = {
               if (!isObject(node) || !node.properties) return;
 
               try {
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: node.properties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(node.properties);
 
                 if (isEmpty(sprinklesProps)) return;
 
@@ -671,12 +650,7 @@ module.exports = {
                     return;
                   }
 
-                  const { sprinklesProps, remainingProps } = separateProps({
-                    sprinklesConfig,
-                    shorthands: shorthands ? [...shorthands] : undefined,
-                    properties: variantValue.properties,
-                    sourceCode,
-                  });
+                  const { sprinklesProps, remainingProps } = separateWithConfig(variantValue.properties);
 
                   if (isEmpty(sprinklesProps)) {
                     return;
@@ -793,12 +767,7 @@ module.exports = {
                 if (allProperties.length === 0) return;
 
                 try {
-                  const { sprinklesProps, remainingProps } = separateProps({
-                    sprinklesConfig,
-                    shorthands: shorthands ? [...shorthands] : undefined,
-                    properties: allProperties,
-                    sourceCode,
-                  });
+                  const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                   if (isEmpty(sprinklesProps)) return;
 
@@ -854,12 +823,7 @@ module.exports = {
                   return;
                 }
 
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: functionBody.properties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(functionBody.properties);
 
                 if (isEmpty(sprinklesProps)) {
                   return;
@@ -912,12 +876,7 @@ module.exports = {
               if (allProperties.length === 0) return;
 
               try {
-                const { sprinklesProps, remainingProps } = separateProps({
-                  sprinklesConfig,
-                  shorthands: shorthands ? [...shorthands] : undefined,
-                  properties: allProperties,
-                  sourceCode,
-                });
+                const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                 if (isEmpty(sprinklesProps)) return;
 
@@ -959,12 +918,7 @@ module.exports = {
                       return;
                     }
 
-                    const { sprinklesProps, remainingProps } = separateProps({
-                      sprinklesConfig,
-                      shorthands: shorthands ? [...shorthands] : undefined,
-                      properties: returnValue.properties,
-                      sourceCode,
-                    });
+                    const { sprinklesProps, remainingProps } = separateWithConfig(returnValue.properties);
 
                     if (isEmpty(sprinklesProps)) {
                       return;
@@ -1017,12 +971,7 @@ module.exports = {
                   if (allProperties.length === 0) return;
 
                   try {
-                    const { sprinklesProps, remainingProps } = separateProps({
-                      sprinklesConfig,
-                      shorthands: shorthands ? [...shorthands] : undefined,
-                      properties: allProperties,
-                      sourceCode,
-                    });
+                    const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                     if (isEmpty(sprinklesProps)) return;
 
