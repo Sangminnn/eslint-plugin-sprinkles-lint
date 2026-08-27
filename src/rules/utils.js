@@ -40,12 +40,37 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
    */
   if (Array.isArray(configValue)) {
     let isIncluded = configValue.includes(cleanValue);
+    
+    // Check for numeric equivalence
     if (!isIncluded && !isNaN(Number(cleanValue))) {
       isIncluded = configValue.includes(Number(cleanValue));
     }
-
+    
+    // Check for string equivalence (case-insensitive)
     if (!isIncluded && typeof cleanValue === 'string') {
       isIncluded = configValue.some((item) => typeof item === 'string' && item.toLowerCase() === cleanValue.toLowerCase());
+    }
+    
+    // Check for px unit bi-directional equivalence (px only special case)
+    // 1. '40px' → check if 40 (number) exists
+    // 2. 40 (number) → check if '40px' (string) exists
+    if (!isIncluded) {
+      // Case 1: value is '40px' string
+      if (typeof cleanValue === 'string') {
+        const pxMatch = cleanValue.match(/^([+-]?\d*\.?\d+)px$/);
+        if (pxMatch) {
+          const numValue = parseFloat(pxMatch[1]);
+          if (!isNaN(numValue)) {
+            isIncluded = configValue.includes(numValue);
+          }
+        }
+      }
+
+      // Case 2: value is number (e.g., 40), check for 'Npx' in config
+      if (!isIncluded && typeof cleanValue === 'number') {
+        const pxString = `${cleanValue}px`;
+        isIncluded = configValue.some(item => item === pxString);
+      }
     }
 
     return isIncluded;
@@ -61,12 +86,30 @@ const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, v
    *  "gray-50": "#f6f6f6",
    *  "gray-100": "#e5e5e5",
    * }
+   *
+   * or
+   *
+   * "flex": {
+   *  "1": "1 1 0%"
+   * }
    */
   if (typeof configValue === 'object' && configValue !== null) {
     const keys = Object.keys(configValue);
-    const keyIncluded = keys.includes(cleanValue);
-    if (keyIncluded) return true;
 
+    // Check direct key match
+    const keyIncluded = keys.includes(cleanValue);
+    if (keyIncluded) {
+      return true;
+    }
+
+    // Check string-converted key match (for numeric values like flex: 1 matching flex: { '1': ... })
+    const stringValue = String(cleanValue);
+    const stringKeyIncluded = keys.includes(stringValue);
+    if (stringKeyIncluded) {
+      return true;
+    }
+
+    // Check value match
     const values = Object.values(configValue);
     const valuesAsString = values.map((v) => String(v).trim());
     const valueIncluded = valuesAsString.includes(String(cleanValue).trim());
@@ -132,21 +175,67 @@ const separateProps = ({ sprinklesConfig, shorthands, properties, sourceCode }) 
 
       const configForProp = sprinklesConfig[propName];
       const isConfigForPropObject = typeof configForProp === 'object' && !Array.isArray(configForProp);
-      const isMatching = isConfigForPropObject ? Object.keys(configForProp).includes(cleanValue) : false;
 
-      if (!isConfigForPropObject || isMatching) {
-        sprinklesMap.set(propName, valueText);
+      // For object config (e.g., flex: { '1': '1 1 0%' }, borderColor: { 'gray-100': '#E5E5E5' })
+      if (isConfigForPropObject) {
+        const keys = Object.keys(configForProp);
+
+        // Check if cleanValue (or its string form) matches any key
+        let matchedKey = null;
+
+        if (keys.includes(cleanValue)) {
+          matchedKey = cleanValue;
+        } else {
+          // Check string-converted match (e.g., numeric 1 matches string key '1')
+          const stringValue = String(cleanValue);
+          if (keys.includes(stringValue)) {
+            matchedKey = stringValue;
+          }
+        }
+
+        if (matchedKey) {
+          // Always use the matched key as a string literal
+          sprinklesMap.set(propName, `'${matchedKey}'`);
+          continue;
+        }
+
+        // Check if cleanValue matches a value in the object (reverse lookup)
+        const keyMatchingToValue = findKeyByValue(configForProp, cleanValue);
+        if (keyMatchingToValue) {
+          sprinklesMap.set(propName, `'${keyMatchingToValue}'`);
+          continue;
+        }
+      } else {
+        // Array config - handle px bi-directional conversion
+        if (Array.isArray(configForProp)) {
+          let finalValue = valueText;
+
+          // Case 1: value is '40px' string, check if 40 (number) exists in config
+          const pxMatch = cleanValue.match(/^([+-]?\d*\.?\d+)px$/);
+          if (pxMatch) {
+            const numValue = parseFloat(pxMatch[1]);
+            if (!isNaN(numValue) && configForProp.includes(numValue)) {
+              // Config has number, convert to number
+              finalValue = String(numValue);
+            }
+          }
+
+          // Case 2: value is number (e.g., 40), check if '40px' exists in config
+          if (propValue.type === 'Literal' && typeof propValue.value === 'number') {
+            const pxString = `${propValue.value}px`;
+            if (configForProp.includes(pxString)) {
+              // Config has 'Npx' string, convert to 'Npx'
+              finalValue = `'${pxString}'`;
+            }
+          }
+
+          sprinklesMap.set(propName, finalValue);
+        } else {
+          // Direct match (not array, not object)
+          sprinklesMap.set(propName, valueText);
+        }
         continue;
       }
-
-      // find key by value
-      const keyMatchingToValue = findKeyByValue(configForProp, cleanValue);
-      if (keyMatchingToValue) {
-        sprinklesMap.set(propName, `'${keyMatchingToValue}'`);
-        continue;
-      }
-
-      sprinklesMap.set(propName, valueText);
     }
 
     const sprinklesProps = Object.fromEntries(sprinklesMap);
@@ -194,24 +283,43 @@ const cleanPropsString = (props) => {
 };
 
 const createTransformTemplate = ({ sourceCode, variables = [], sprinklesProps, remainingProps, isArrayContext = false }) => {
+  // 빈 객체/배열 처리를 위한 스마트한 함수로 수정
+  const isSprinklesEmpty = isEmpty(sprinklesProps);
+  const isRemainingEmpty = isEmpty(remainingProps);
+  const isVariablesEmpty = variables.length === 0;
+
+  // 모든 것이 비어있는 경우
+  if (isSprinklesEmpty && isRemainingEmpty && isVariablesEmpty) {
+    return isArrayContext ? '[]' : '{}';
+  }
+
   const sprinklesString = cleanPropsString(sprinklesProps);
   const remainingString = cleanPropsString(remainingProps);
 
+  // 필터링된 요소 배열 구성
   const elements = [
     ...variables.map((v) => sourceCode.getText(v)),
-    `sprinkles({\n    ${sprinklesString}\n  })`,
-    ...(isEmpty(remainingProps) ? [] : [`{\n    ${remainingString}\n  }`]),
+    ...(isSprinklesEmpty ? [] : [`sprinkles({\n    ${sprinklesString}\n  })`]),
+    ...(isRemainingEmpty ? [] : [`{\n    ${remainingString}\n  }`]),
   ];
 
+  // 배열 컨텍스트인 경우 그대로 배열 반환
   if (isArrayContext) {
     return `[\n  ${elements.join(',\n  ')}\n]`;
   }
 
-  if (variables.length > 0 || !isEmpty(remainingProps)) {
+  // 변수나 남은 스타일이 있는 경우 style 배열로 감싸기
+  if (!isVariablesEmpty || !isRemainingEmpty) {
     return `style([\n  ${elements.join(',\n  ')}\n])`;
   }
 
-  return `sprinkles({\n    ${sprinklesString}\n  })`;
+  // sprinklesProps만 있는 경우
+  if (!isSprinklesEmpty) {
+    return `sprinkles({\n    ${sprinklesString}\n  })`;
+  }
+
+  // 어떤 것도 없는 경우(이 경우는 위에서 이미 처리되었지만 안전장치로 포함)
+  return '{}';
 };
 
 const isSprinklesCall = (node) => {

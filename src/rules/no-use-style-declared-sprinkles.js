@@ -114,11 +114,6 @@ module.exports = {
                   property: targetProperties,
                 },
                 fix(fixer) {
-                  if (isEmpty(remainingProps)) {
-                    // return sprinkles only template
-                    return fixer.replaceText(node, `sprinkles(${sourceCode.getText(styleArgument)})`);
-                  }
-
                   return fixer.replaceText(
                     node,
                     createTransformTemplate({
@@ -439,15 +434,19 @@ module.exports = {
                     property: Object.keys(sprinklesProps).join(', '),
                   },
                   fix(fixer) {
-                    return fixer.replaceText(
-                      valueNode,
-                      createTransformTemplate({
-                        sourceCode,
-                        sprinklesProps,
-                        remainingProps,
-                        isArrayContext: !isEmpty(remainingProps),
-                      }),
-                    );
+                    const transformResult = createTransformTemplate({
+                      sourceCode,
+                      sprinklesProps,
+                      remainingProps,
+                      isArrayContext: !isEmpty(remainingProps),
+                    });
+
+                    // null이 반환되면 빈 배열 또는 빈 객체로 대체
+                    if (transformResult === null) {
+                      return fixer.replaceText(valueNode, !isEmpty(remainingProps) ? '[]' : '{}');
+                    }
+
+                    return fixer.replaceText(valueNode, transformResult);
                   },
                 });
               } catch (error) {}
@@ -523,16 +522,20 @@ module.exports = {
                     property: Object.keys(sprinklesProps).join(', '),
                   },
                   fix(fixer) {
-                    return fixer.replaceText(
-                      node,
-                      createTransformTemplate({
-                        sourceCode,
-                        variables,
-                        sprinklesProps,
-                        remainingProps,
-                        isArrayContext: !(isEmpty(remainingProps) && variables.length === 0),
-                      }),
-                    );
+                    const transformResult = createTransformTemplate({
+                      sourceCode,
+                      variables,
+                      sprinklesProps,
+                      remainingProps,
+                      isArrayContext: !(isEmpty(remainingProps) && variables.length === 0),
+                    });
+
+                    // null이 반환되면 빈 배열 또는 빈 객체로 대체
+                    if (transformResult === null) {
+                      return fixer.replaceText(node, !(isEmpty(remainingProps) && variables.length === 0) ? '[]' : '{}');
+                    }
+
+                    return fixer.replaceText(node, transformResult);
                   },
                 });
               } catch (error) {}
