@@ -79,6 +79,87 @@ test('T3. import already present → no duplicate import', async () => {
   assert.strictEqual((result.output.match(/import \{ sprinkles \}/g) || []).length, 1);
 });
 
+// --- Fix 2: properties in an override object composed with other classes stay where they are ---
+
+test('T4. override object with movable property → manualSeparationRequired, no fix', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const removeButton = style([
+  someTypography,
+  sprinkles({ marginRight: 22, color: 'gray-900' }),
+  {
+    width: 'auto',
+    selectors: { '&:disabled': { cursor: 'default' } },
+  },
+]);`);
+
+  assert.strictEqual(result.messages.length, 1);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(result.output, undefined, 'override object must not be rewritten');
+  assert.ok(result.messages[0].message.includes('width'));
+  assert.ok(!result.messages[0].message.includes('marginRight'), 'guard message lists override-object props only');
+  assert.ok(!result.messages[0].message.includes('color'), 'guard message lists override-object props only');
+});
+
+test('T4-regression. brief case with sprinkles values outside the config still reports width only', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const removeButton = style([
+  someTypography,
+  sprinkles({ marginLeft: 6, color: 'gray-600' }),
+  {
+    width: 'auto',
+    selectors: { '&:disabled': { cursor: 'default' } },
+  },
+]);`);
+
+  assert.strictEqual(result.messages.length, 1);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(result.output, undefined);
+  assert.ok(result.messages[0].message.includes('width'));
+  assert.ok(!result.messages[0].message.includes('marginLeft'));
+});
+
+test('T5. override object without sprinkles values → no report', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const box = style([sprinkles({ width: 'auto' }), { transform: 'scale(1.1)' }]);`);
+
+  assert.strictEqual(result.messages.length, 0);
+  assert.strictEqual(result.output, undefined);
+});
+
+test('T6. removeStyle path is untouched: style([sprinkles(...)]) → sprinkles(...)', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const box = style([sprinkles({ width: 'auto' })]);`);
+
+  assert.strictEqual(result.messages.length, 0, 'removeStyle should have been fixed');
+  assert.ok(result.output.includes(`const box = sprinkles({ width: 'auto' })`));
+});
+
+test('T9. override object + invalid sprinkles value → no fix, no broken output', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const box = style([sprinkles({ color: 'notInConfig' }), { transform: 'scale(1.1)' }]);`);
+
+  assert.strictEqual(result.output, undefined);
+  assert.ok(result.messages.every((message) => !message.fatal), 'output must stay parseable');
+});
+
+// --- sprinkles() holding values outside the config (no override object) is rewritten to style() ---
+
+test('T10. style([sprinkles({ invalid })]) → style({ invalid }) that parses', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const box = style([sprinkles({ color: 'notInConfig' })]);`);
+
+  assert.ok(result.messages.every((message) => !message.fatal), 'output must stay parseable');
+  assert.ok(result.output.includes(`style({\n  color: 'notInConfig'\n})`), `unexpected output:\n${result.output}`);
+});
+
+test('T11. style([base, sprinkles({ invalid })]) keeps the composed class', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const box = style([base, sprinkles({ color: 'notInConfig' })]);`);
+
+  assert.ok(result.messages.every((message) => !message.fatal), 'output must stay parseable');
+  assert.ok(result.output.includes(`style([base, {\n  color: 'notInConfig'\n}])`), `unexpected output:\n${result.output}`);
+});
+
 // --- import detection / insertion edge cases ---
 
 test('T12. sprinkles import declared below the call (hoisted) → no duplicate import', async () => {
@@ -95,6 +176,40 @@ test('T13. directive prologue stays first when the import is inserted', async ()
   });
 
   assert.ok(result.output.startsWith(`'use client';\n${SPRINKLES_IMPORT}`), `unexpected output:\n${result.output}`);
+});
+
+// --- Fix 3: the message only names props that are about to move into sprinkles() ---
+
+test('T7. recipe base: props already inside sprinkles() are not listed', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}
+const button = recipe({
+  base: [sprinkles({ width: 'auto' }), { color: 'gray-900' }],
+});`,
+    {},
+    { fix: false },
+  );
+
+  assert.strictEqual(result.messages.length, 1);
+  assert.strictEqual(result.messages[0].messageId, 'useSprinkles');
+  assert.ok(result.messages[0].message.includes(`'color'`));
+  assert.ok(!result.messages[0].message.includes('width'));
+});
+
+test('T8. styleVariants array: props already inside sprinkles() are not listed', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}
+const variants = styleVariants({
+  primary: [sprinkles({ width: 'auto' }), { color: 'gray-900' }],
+});`,
+    {},
+    { fix: false },
+  );
+
+  assert.strictEqual(result.messages.length, 1);
+  assert.strictEqual(result.messages[0].messageId, 'useSprinkles');
+  assert.ok(result.messages[0].message.includes(`'color'`));
+  assert.ok(!result.messages[0].message.includes('width'));
 });
 
 // --- runner ---

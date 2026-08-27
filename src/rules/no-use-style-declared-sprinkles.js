@@ -67,6 +67,8 @@ module.exports = {
     ],
     messages: {
       useSprinkles: "🚨 '{{ property }}' is defined in Sprinkles. Use sprinkles property instead.",
+      manualSeparationRequired:
+        "'{{ property }}' can move to Sprinkles, but it sits in an override object composed with other classes. Moving it changes cascade order — move manually and verify the rendered result.",
       removeStyle: 'Style wrapper should be removed',
     },
     fixable: 'code',
@@ -91,6 +93,16 @@ module.exports = {
         properties,
         sourceCode,
       });
+
+    // When props already inside sprinkles() are merged with the style object for re-separation,
+    // the message should only name the props that are about to move into sprinkles().
+    const listPropsMovingIntoSprinkles = (sprinklesProps, sprinklesCall) => {
+      const existingNames = (sprinklesCall?.arguments?.[0]?.properties || []).map((prop) => prop.key.name || prop.key.value);
+      const movingNames = Object.keys(sprinklesProps).filter((name) => !existingNames.includes(name));
+      const names = movingNames.length > 0 ? movingNames : Object.keys(sprinklesProps);
+
+      return names.join(', ');
+    };
 
     const programBody = sourceCode.ast.body;
     const importsSprinkles = (statement) =>
@@ -203,6 +215,25 @@ module.exports = {
                 // if error, continue
               }
 
+              // A sprinkles atom and a local style() rule share the same specificity, so the winner is
+              // decided by sheet order. Properties left in the override object are there to beat the
+              // composed classes; hoisting them into sprinkles() would reorder the cascade.
+              if (nonSprinklesObject) {
+                const { sprinklesProps: movableProps } = separateWithConfig(nonSprinklesProperties);
+
+                if (!isEmpty(movableProps)) {
+                  context.report({
+                    node,
+                    messageId: 'manualSeparationRequired',
+                    data: {
+                      property: Object.keys(movableProps).join(', '),
+                    },
+                  });
+                }
+
+                return;
+              }
+
               const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];
 
               try {
@@ -220,20 +251,20 @@ module.exports = {
                       property: 'all',
                     },
                     fix(fixer) {
-                      if (variables.length > 0) {
-                        return fixer.replaceText(node, `style({\n  ${formattedRemainingProps}\n})`);
-                      } else {
-                        return fixer.replaceText(
-                          node,
-                          `style([${variables.map((el) => sourceCode.getText(el)).join(', ')}, ${formattedRemainingProps}])`,
-                        );
+                      const remainingObject = `{\n  ${formattedRemainingProps}\n}`;
+
+                      if (variables.length === 0) {
+                        return fixer.replaceText(node, `style(${remainingObject})`);
                       }
+
+                      const variableTexts = variables.map((el) => sourceCode.getText(el)).join(', ');
+                      return fixer.replaceText(node, `style([${variableTexts}, ${remainingObject}])`);
                     },
                   });
                   return;
                 }
 
-                const targetProperties = Object.keys(sprinklesProps).join(', ');
+                const targetProperties = listPropsMovingIntoSprinkles(sprinklesProps, sprinklesCall);
 
                 context.report({
                   node,
@@ -398,7 +429,7 @@ module.exports = {
                 const { sprinklesProps, remainingProps } = separateWithConfig(allProperties);
 
                 if (!isEmpty(sprinklesProps)) {
-                  const targetProperties = Object.keys(sprinklesProps).join(', ');
+                  const targetProperties = listPropsMovingIntoSprinkles(sprinklesProps, sprinklesCall);
 
                   context.report({
                     node: baseProperty.value,
@@ -551,7 +582,7 @@ module.exports = {
                   node,
                   messageId: 'useSprinkles',
                   data: {
-                    property: Object.keys(sprinklesProps).join(', '),
+                    property: listPropsMovingIntoSprinkles(sprinklesProps, sprinklesCall),
                   },
                   fix: withSprinklesImport((fixer) => {
                     const transformResult = createTransformTemplate({
@@ -824,7 +855,7 @@ module.exports = {
                     node: variantValue,
                     messageId: 'useSprinkles',
                     data: {
-                      property: Object.keys(sprinklesProps).join(', '),
+                      property: listPropsMovingIntoSprinkles(sprinklesProps, sprinklesCall),
                     },
                     fix: withSprinklesImport((fixer) => {
                       return fixer.replaceText(
@@ -919,7 +950,7 @@ module.exports = {
                   node: functionBody,
                   messageId: 'useSprinkles',
                   data: {
-                    property: Object.keys(sprinklesProps).join(', '),
+                    property: listPropsMovingIntoSprinkles(sprinklesProps, sprinklesCall),
                   },
                   fix: withSprinklesImport((fixer) => {
                     return fixer.replaceText(
@@ -1014,7 +1045,7 @@ module.exports = {
                       node: returnValue,
                       messageId: 'useSprinkles',
                       data: {
-                        property: Object.keys(sprinklesProps).join(', '),
+                        property: listPropsMovingIntoSprinkles(sprinklesProps, sprinklesCall),
                       },
                       fix: withSprinklesImport((fixer) => {
                         return fixer.replaceText(
