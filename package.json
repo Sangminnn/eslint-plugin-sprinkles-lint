@@ -10,7 +10,8 @@
     "src",
     "README.md",
     "LICENSE",
-    "eslint.config.js"
+    "eslint.config.js",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "lint": "eslint .",
