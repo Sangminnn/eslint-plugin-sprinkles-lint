@@ -14,7 +14,10 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "test": "node src/tests/sprinkles-rules.test.js"
+    "test": "node src/tests/comprehensive.test.js",
+    "test:basic": "node src/tests/sprinkles-rules.test.js",
+    "test:transform": "node src/tests/transformation.test.js",
+    "test:live": "node src/tests/live-transformation.test.js"
   },
   "keywords": [
     "eslint",
