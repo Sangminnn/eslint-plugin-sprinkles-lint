@@ -1,1 +1,25 @@
 /node_modules
+
+# lock files other than pnpm
+/yarn.lock
+/package-lock.json
+
+# local debug scripts, fixtures and logs
+/test-*.js
+/debug-sprinkles-config.js
+/src/data/
+/src/tests/debug-regex.js
+/src/tests/pattern4-test.js
+*.log
+
+# local planning notes
+/CASE.md
+/action.md
+/agent-strategy.md
+/execution-plan.md
+/improvement-tasks.md
+/plan.md
+/solve.md
+
+# tool state
+/.omc/
