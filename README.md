@@ -2,9 +2,9 @@
 
 An ESLint plugin that warns when declaring styles without using already defined Sprinkles when using Vanilla Extract's Sprinkles feature.
 
-This Plugin does not support ESLint Flat Config yet.
+✅ **ESLint Flat Config 지원** - Legacy `.eslintrc` 및 최신 `eslint.config.js` 모두 지원
 
-Shorthands also supported.
+✅ **Shorthands 지원** - px, py, mx, my 등 단축 속성 지원
 
 and If you're directly using values that exist in your sprinkles config, this lint rule will automatically convert them to their corresponding sprinkles keys.
 
@@ -126,40 +126,99 @@ exportConfig().catch(console.error);
 "export-sprinkles": "tsx scripts/exportSprinklesConfig.ts",
 ```
 
-### STEP 4. Add rule to your .eslintrc.js
+### STEP 4. Add rule to your ESLint config
 
+**Flat Config (eslint.config.js)**:
+```js
+// eslint.config.js
+const sprinklesLint = require('eslint-plugin-sprinkles-lint');
+
+module.exports = [
+  {
+    files: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"],
+    plugins: {
+      "sprinkles-lint": sprinklesLint,
+    },
+    rules: {
+      "sprinkles-lint/no-use-style-declared-sprinkles": [
+        "error",
+        {
+          configPath: `${YOUR_CONFIG_FILE_PATH}`
+        }
+      ],
+    },
+  },
+];
+```
+
+**Legacy Config (.eslintrc.js)**:
 ```js
 // .eslintrc.js
-
-"sprinkles-lint/no-use-style-declared-sprinkles": [
-  "error",
-  {
-    "configPath": `${YOUR_CONFIG_FILE_PATH}`
+module.exports = {
+  plugins: ["sprinkles-lint"],
+  rules: {
+    "sprinkles-lint/no-use-style-declared-sprinkles": [
+      "error",
+      {
+        configPath: `${YOUR_CONFIG_FILE_PATH}`
+      }
+    ]
   }
-]
+};
 ```
 
 ## Installation
 
 ```bash
-// npm
+# npm
 npm install eslint-plugin-sprinkles-lint
 
-// yarn
+# yarn
 yarn add eslint-plugin-sprinkles-lint
 
-// pnpm
+# pnpm
 pnpm add eslint-plugin-sprinkles-lint
 ```
 
 ## Usage
+
+### ESLint Flat Config (eslint.config.js) - 권장
+
+```js
+// eslint.config.js
+const sprinklesLint = require('eslint-plugin-sprinkles-lint');
+
+module.exports = [
+  {
+    files: ["**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx"],
+    plugins: {
+      "sprinkles-lint": sprinklesLint,
+    },
+    rules: {
+      "sprinkles-lint/no-use-style-declared-sprinkles": [
+        "error",
+        {
+          configPath: './path/to/your/sprinkles.config.js'
+        }
+      ],
+    },
+  },
+];
+```
+
+### Legacy Config (.eslintrc.js)
 
 ```js
 // .eslintrc.js
 module.exports = {
   plugins: ["sprinkles-lint"],
   rules: {
-    "sprinkles-lint/no-use-style-declared-sprinkles": "error",
+    "sprinkles-lint/no-use-style-declared-sprinkles": [
+      "error",
+      {
+        configPath: './path/to/your/sprinkles.config.js'
+      }
+    ],
   },
 };
 ```

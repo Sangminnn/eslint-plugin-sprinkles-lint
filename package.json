@@ -1,12 +1,16 @@
 {
   "name": "eslint-plugin-sprinkles-lint",
   "version": "2.12.0",
-  "description": "eslint plugin for using already declared sprinkles",
+  "description": "ESLint plugin for vanilla-extract sprinkles (supports both legacy and flat config)",
   "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
   "files": [
     "src",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "eslint.config.js"
   ],
   "scripts": {
     "lint": "eslint .",
@@ -17,7 +21,9 @@
     "plugin",
     "vanilla-extract",
     "sprinkles",
-    "lint"
+    "lint",
+    "flat-config",
+    "eslint-config"
   ],
   "author": "Sangminnn <psm0102psm@gmail.com>",
   "license": "ISC",
@@ -29,6 +35,6 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/Sangminnn/eslint-plugin-sprinkles-lint.git"
+    "url": "git+https://github.com/Sangminnn/eslint-plugin-sprinkles-lint.git"
   }
 }
