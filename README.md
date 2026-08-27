@@ -223,6 +223,77 @@ module.exports = {
 };
 ```
 
+### Options
+
+| Option | Type | Description |
+|---|---|---|
+| `configPath` | `string` | Path to the exported sprinkles config (see STEP 1–3). |
+| `sprinklesImportSource` | `string` | Module specifier used when `--fix` has to add `import { sprinkles } from '...'` to a file that does not import it yet (e.g. `'@/styles/sprinkles.css'`). Without it, files that do not import `sprinkles` are reported but **not** auto-fixed. |
+
+```js
+"sprinkles-lint/no-use-style-declared-sprinkles": [
+  "error",
+  {
+    configPath: './path/to/your/sprinkles.config.js',
+    sprinklesImportSource: '@/styles/sprinkles.css',
+  },
+],
+```
+
+## Autofix safety
+
+Detection always runs. For `style(...)` calls, `--fix` is only offered when applying it keeps the file compiling and rendering the same. See the known gap below for `recipe` / `styleVariants`.
+
+### 1. `sprinkles` import
+
+Replacing `style({...})` with `sprinkles({...})` in a file that never imports `sprinkles` breaks compilation (`TS2304: Cannot find name 'sprinkles'`). The rule therefore:
+
+- applies the fix as-is when the file already imports `sprinkles`,
+- inserts `import { sprinkles } from '<sprinklesImportSource>'` together with the fix when the option is set,
+- reports without a fix otherwise.
+
+### 2. Override objects composed with other classes (no autofix)
+
+```js
+// Button base: sprinkles({ width: '100%' })
+export const removeButton = style([
+  typography,
+  sprinkles({ marginLeft: 6 }),
+  { width: 'auto' }, // overrides Button's width when composed via className
+]);
+```
+
+`width: 'auto'` exists in sprinkles, but it must **not** be hoisted into the `sprinkles()` call. A sprinkles atom and a local `style()` rule are both single-class selectors with equal specificity, so the winner is decided by sheet order: local `style()` rules are emitted after the sprinkles sheet and win, while atoms are ordered by their position in the scale array. Moving the property flips the cascade — in the case above the button stretched to full width.
+
+For `style([sprinkles(...), { ... }])` the rule reports `manualSeparationRequired` and leaves the code untouched. Move the property yourself only after confirming the class is not composed with another class that sets the same property.
+
+**Known gap:** the same hoisting is still auto-fixed inside `recipe({ base: [...] })`, `recipe` variants and `styleVariants` arrays. Review `--fix` output in those places (or use the cascade-layer setup below, which makes the move safe everywhere).
+
+### 3. Standalone `style({...})` (autofixed, verify composition)
+
+`style({ width: 'auto' })` → `sprinkles({ width: 'auto' })` is still auto-fixed. Whether that class is later composed with another component's base class cannot be known from the file, so check call sites that pass it as `className` to a component with its own `width`.
+
+### Recommended: put sprinkles in a cascade layer
+
+Both risks above disappear when sprinkles atoms live in a `@layer`: unlayered styles (your local `style()` rules) always win over layered ones, regardless of sheet order.
+
+```ts
+// sprinkles.css.ts
+import { layer } from '@vanilla-extract/css';
+import { defineProperties, createSprinkles } from '@vanilla-extract/sprinkles';
+
+export const sprinklesLayer = layer();
+
+const properties = defineProperties({
+  '@layer': sprinklesLayer,
+  properties: { /* ... */ },
+});
+
+export const sprinkles = createSprinkles(properties);
+```
+
+`layer()` and the `'@layer'` option of `defineProperties` are documented in the vanilla-extract docs ([layer](https://vanilla-extract.style/documentation/api/layer/), [sprinkles](https://vanilla-extract.style/documentation/packages/sprinkles/)). Cascade layers are not polyfilled — check your browser support matrix.
+
 ## Example
 
 ### Default Setting
@@ -261,7 +332,7 @@ const testStyle = sprinkles({
 });
 ```
 
-### Case 2 - Using style with sprinkles in array
+### Case 2 - Using style with sprinkles in array (reported, not autofixed)
 
 ```js
 // as-is
@@ -276,7 +347,8 @@ const testStyle = style([
   },
 ]);
 
-// to-be
+// reported: `'marginTop' can move to Sprinkles, but it sits in an override object ...`
+// move it manually once you have confirmed the class is not overriding a composed class:
 const testStyle = style([
   sprinkles({
     backgroundColor: "red",
@@ -288,7 +360,9 @@ const testStyle = style([
 ]);
 ```
 
-### Case 3 - Using style with sprinkles in array, but actually doesn't need style object
+See [Autofix safety](#2-override-objects-composed-with-other-classes-no-autofix) for why this case is not auto-fixed.
+
+### Case 3 - Using style with sprinkles in array, but actually doesn't need style object (reported, not autofixed)
 
 ```js
 // as-is
@@ -302,9 +376,8 @@ const testStyle = style([
   },
 ]);
 
-// to-be
-
-// remove style object and use sprinkles only
+// reported: `'backgroundColor, marginTop' can move to Sprinkles, but it sits in an override object ...`
+// after moving them manually, the wrapper becomes removable (Style wrapper should be removed — autofixed):
 const testStyle = sprinkles({
   cursor: "pointer",
   backgroundColor: "red",
