@@ -7,6 +7,10 @@ const path = require('path');
 
 const pluginPath = path.resolve(__dirname, '../..');
 
+const SPRINKLES_IMPORT = `import { sprinkles } from '@/styles/sprinkles.css';\n`;
+const withSprinklesImport = (code) => `${SPRINKLES_IMPORT}${code}`;
+const stripSprinklesImport = (output) => (output ? output.replace(SPRINKLES_IMPORT, '') : output);
+
 async function demonstrateTransformations() {
   console.log('🎬 실시간 코드 변환 시연\n');
 
@@ -82,7 +86,7 @@ async function demonstrateTransformations() {
     console.log(demo.code);
     
     try {
-      const results = await eslint.lintText(demo.code, { filePath: `demo${i+1}.js` });
+      const results = await eslint.lintText(withSprinklesImport(demo.code), { filePath: `demo${i+1}.js` });
       const result = results[0];
       
       if (result.messages.length > 0) {
@@ -94,7 +98,7 @@ async function demonstrateTransformations() {
         
         if (result.output) {
           console.log('\n📤 자동 변환 후:');
-          console.log(result.output);
+          console.log(stripSprinklesImport(result.output));
           
           // 변환 분석
           console.log('\n🔍 변환 분석:');
@@ -104,7 +108,7 @@ async function demonstrateTransformations() {
           if (result.output.includes('style([')) {
             console.log('   ✅ 혼합 스타일을 배열로 분리함');
           }
-          if (result.output !== demo.code) {
+          if (stripSprinklesImport(result.output) !== demo.code) {
             console.log('   ✅ 코드가 성공적으로 변환됨');
           }
         } else {
@@ -151,11 +155,11 @@ async function showBeforeAfterComparison() {
   
   for (const code of comparisons) {
     try {
-      const results = await eslint.lintText(code, { filePath: 'comparison.js' });
+      const results = await eslint.lintText(withSprinklesImport(code), { filePath: 'comparison.js' });
       const result = results[0];
       
       const before = code.replace(/\s+/g, ' ');
-      const after = result.output ? result.output.replace(/\s+/g, ' ') : '변경 없음';
+      const after = result.output ? stripSprinklesImport(result.output).replace(/\s+/g, ' ') : '변경 없음';
       const status = result.messages.length > 0 ? '🔄 변환됨' : '✅ 정상';
       
       console.log(`| \`${before}\` | \`${after}\` | ${status} |`);

@@ -1,6 +1,8 @@
 const { RuleTester } = require('eslint');
 const rule = require('../rules/no-use-style-declared-sprinkles');
 
+const SPRINKLES_IMPORT = `import { sprinkles } from '@/styles/sprinkles.css';\n`;
+
 // Mock sprinkles config with flex property
 const mockConfig = {
   sprinklesConfig: {
@@ -40,16 +42,16 @@ ruleTester.run('no-use-style-declared-sprinkles (flex conversion)', rule, {
   ],
   invalid: [
     {
-      code: `const s = style({ flex: 1 })`,
-      output: `const s = sprinkles({
+      code: `${SPRINKLES_IMPORT}const s = style({ flex: 1 })`,
+      output: `${SPRINKLES_IMPORT}const s = sprinkles({
     flex: '1'
   })`,
       options: [mockConfig],
       errors: [{ messageId: 'useSprinkles' }],
     },
     {
-      code: `const s = style({ flex: 1, display: 'flex' })`,
-      output: `const s = sprinkles({
+      code: `${SPRINKLES_IMPORT}const s = style({ flex: 1, display: 'flex' })`,
+      output: `${SPRINKLES_IMPORT}const s = sprinkles({
     flex: '1',
     display: 'flex'
   })`,
@@ -57,16 +59,16 @@ ruleTester.run('no-use-style-declared-sprinkles (flex conversion)', rule, {
       errors: [{ messageId: 'useSprinkles' }],
     },
     {
-      code: `const s = style([{ flex: 1 }])`,
-      output: `const s = sprinkles({
+      code: `${SPRINKLES_IMPORT}const s = style([{ flex: 1 }])`,
+      output: `${SPRINKLES_IMPORT}const s = sprinkles({
     flex: '1'
   })`,
       options: [mockConfig],
       errors: [{ messageId: 'useSprinkles' }],
     },
     {
-      code: `const s = style({ flex: 1, color: 'gray-800' })`,
-      output: `const s = sprinkles({
+      code: `${SPRINKLES_IMPORT}const s = style({ flex: 1, color: 'gray-800' })`,
+      output: `${SPRINKLES_IMPORT}const s = sprinkles({
     flex: '1',
     color: 'gray-800'
   })`,

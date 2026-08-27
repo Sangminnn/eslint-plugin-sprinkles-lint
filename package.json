@@ -14,8 +14,10 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "test": "node src/tests/comprehensive.test.js",
+    "test": "node src/tests/comprehensive.test.js && node src/tests/flex-conversion.test.js && node src/tests/autofix-safety.test.js",
     "test:basic": "node src/tests/sprinkles-rules.test.js",
+    "test:flex": "node src/tests/flex-conversion.test.js",
+    "test:autofix": "node src/tests/autofix-safety.test.js",
     "test:transform": "node src/tests/transformation.test.js",
     "test:live": "node src/tests/live-transformation.test.js"
   },

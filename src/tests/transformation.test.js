@@ -7,6 +7,10 @@ const path = require('path');
 
 const pluginPath = path.resolve(__dirname, '../..');
 
+const SPRINKLES_IMPORT = `import { sprinkles } from '@/styles/sprinkles.css';\n`;
+const withSprinklesImport = (code) => `${SPRINKLES_IMPORT}${code}`;
+const stripSprinklesImport = (output) => (output ? output.replace(SPRINKLES_IMPORT, '') : output);
+
 async function testTransformation() {
   console.log('🔄 코드 변환 과정 상세 검증 테스트\n');
 
@@ -85,7 +89,7 @@ async function testTransformation() {
     console.log('━'.repeat(50));
     
     try {
-      const results = await eslint.lintText(testCase.input, { filePath: 'test.js' });
+      const results = await eslint.lintText(withSprinklesImport(testCase.input), { filePath: 'test.js' });
       const result = results[0];
       
       console.log('🔹 원본 코드:');
@@ -100,7 +104,7 @@ async function testTransformation() {
         
         if (result.output) {
           console.log('\n✨ 자동 수정 결과:');
-          console.log(result.output);
+          console.log(stripSprinklesImport(result.output));
           
           // 변환 성공 여부 확인
           if (testCase.expected && typeof testCase.expected === 'string' && testCase.expected.includes('sprinkles')) {
@@ -155,12 +159,12 @@ async function testSpecificTransformations() {
     {
       name: '색상 값 매핑',
       before: `style({ color: 'gray-900' })`,
-      expectedPattern: /sprinkles\(\s*\{\s*color:\s*['"]gray-900['"].*\}\s*\)/,
+      expectedPattern: /sprinkles\(\s*\{\s*color:\s*['"]gray-900['"][\s\S]*\}\s*\)/,
     },
     {
       name: '폰트 굵기 변환',
       before: `style({ fontWeight: 700 })`,
-      expectedPattern: /sprinkles\(\s*\{\s*fontWeight:\s*700.*\}\s*\)/,
+      expectedPattern: /sprinkles\(\s*\{\s*fontWeight:\s*700[\s\S]*\}\s*\)/,
     },
     {
       name: '위치 속성 변환',
@@ -173,13 +177,13 @@ async function testSpecificTransformations() {
     console.log(`🔍 ${test.name}`);
     
     try {
-      const results = await eslint.lintText(test.before, { filePath: 'test.js' });
+      const results = await eslint.lintText(withSprinklesImport(test.before), { filePath: 'test.js' });
       const result = results[0];
       
       if (result.output) {
         const matches = test.expectedPattern.test(result.output);
         console.log(`   변환 전: ${test.before}`);
-        console.log(`   변환 후: ${result.output}`);
+        console.log(`   변환 후: ${stripSprinklesImport(result.output)}`);
         console.log(`   패턴 매치: ${matches ? '✅ 성공' : '❌ 실패'}`);
       } else {
         console.log(`   ⚠️  자동 수정 없음`);

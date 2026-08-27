@@ -58,6 +58,9 @@ module.exports = {
           configPath: {
             type: 'string',
           },
+          sprinklesImportSource: {
+            type: 'string',
+          },
         },
         additionalProperties: false,
       },
@@ -89,6 +92,35 @@ module.exports = {
         sourceCode,
       });
 
+    const programBody = sourceCode.ast.body;
+    const importsSprinkles = (statement) =>
+      statement.type === 'ImportDeclaration' && statement.specifiers.some((specifier) => specifier.local?.name === 'sprinkles');
+    // Imports hoist, so the whole program body is checked instead of relying on traversal order.
+    const hasSprinklesImport = programBody.some(importsSprinkles);
+
+    const isDirective = (statement) => statement.type === 'ExpressionStatement' && typeof statement.directive === 'string';
+    const firstNonDirectiveStatement = programBody.find((statement) => !isDirective(statement));
+
+    // Inserting `sprinkles(...)` into a file that never imports it produces code that does not compile.
+    // Fixes that emit a sprinkles call are offered as-is when the import is present, extended with an
+    // import insertion when `sprinklesImportSource` is configured, and withheld otherwise.
+    const withSprinklesImport = (buildFix) => {
+      if (hasSprinklesImport) {
+        return buildFix;
+      }
+
+      if (!options.sprinklesImportSource || !firstNonDirectiveStatement) {
+        return undefined;
+      }
+
+      return (fixer) => {
+        const importStatement = `import { sprinkles } from '${options.sprinklesImportSource}';\n`;
+        const insertImport = fixer.insertTextBefore(firstNonDirectiveStatement, importStatement);
+
+        return [].concat(buildFix(fixer), insertImport);
+      };
+    };
+
     return {
       CallExpression(node) {
         // using style
@@ -113,7 +145,7 @@ module.exports = {
                 data: {
                   property: targetProperties,
                 },
-                fix(fixer) {
+                fix: withSprinklesImport((fixer) => {
                   return fixer.replaceText(
                     node,
                     createTransformTemplate({
@@ -122,7 +154,7 @@ module.exports = {
                       remainingProps,
                     }),
                   );
-                },
+                }),
               });
             } catch (error) {
               // if error, continue
@@ -209,7 +241,7 @@ module.exports = {
                   data: {
                     property: targetProperties,
                   },
-                  fix(fixer) {
+                  fix: withSprinklesImport((fixer) => {
                     return fixer.replaceText(
                       node,
                       createTransformTemplate({
@@ -219,7 +251,7 @@ module.exports = {
                         remainingProps,
                       }),
                     );
-                  },
+                  }),
                 });
               } catch (error) {
                 // if error, continue
@@ -249,7 +281,7 @@ module.exports = {
                     data: {
                       property: targetProperties,
                     },
-                    fix(fixer) {
+                    fix: withSprinklesImport((fixer) => {
                       return fixer.replaceText(
                         node,
                         createTransformTemplate({
@@ -259,7 +291,7 @@ module.exports = {
                           remainingProps,
                         }),
                       );
-                    },
+                    }),
                   });
                 } catch (error) {
                   // if error, continue
@@ -374,7 +406,7 @@ module.exports = {
                     data: {
                       property: targetProperties,
                     },
-                    fix(fixer) {
+                    fix: withSprinklesImport((fixer) => {
                       return fixer.replaceText(
                         baseProperty.value,
                         createTransformTemplate({
@@ -385,7 +417,7 @@ module.exports = {
                           isArrayContext: variables.length > 0 || !isEmpty(remainingProps),
                         }),
                       );
-                    },
+                    }),
                   });
                 }
               } catch (error) {}
@@ -433,7 +465,7 @@ module.exports = {
                   data: {
                     property: Object.keys(sprinklesProps).join(', '),
                   },
-                  fix(fixer) {
+                  fix: withSprinklesImport((fixer) => {
                     const transformResult = createTransformTemplate({
                       sourceCode,
                       sprinklesProps,
@@ -447,7 +479,7 @@ module.exports = {
                     }
 
                     return fixer.replaceText(valueNode, transformResult);
-                  },
+                  }),
                 });
               } catch (error) {}
             };
@@ -521,7 +553,7 @@ module.exports = {
                   data: {
                     property: Object.keys(sprinklesProps).join(', '),
                   },
-                  fix(fixer) {
+                  fix: withSprinklesImport((fixer) => {
                     const transformResult = createTransformTemplate({
                       sourceCode,
                       variables,
@@ -536,7 +568,7 @@ module.exports = {
                     }
 
                     return fixer.replaceText(node, transformResult);
-                  },
+                  }),
                 });
               } catch (error) {}
             };
@@ -583,7 +615,7 @@ module.exports = {
                   data: {
                     property: Object.keys(sprinklesProps).join(', '),
                   },
-                  fix(fixer) {
+                  fix: withSprinklesImport((fixer) => {
                     return fixer.replaceText(
                       node,
                       createTransformTemplate({
@@ -593,7 +625,7 @@ module.exports = {
                         isArrayContext: !isEmpty(remainingProps),
                       }),
                     );
-                  },
+                  }),
                 });
               } catch (error) {}
             };
@@ -667,7 +699,7 @@ module.exports = {
                     data: {
                       property: targetProperties,
                     },
-                    fix(fixer) {
+                    fix: withSprinklesImport((fixer) => {
                       return fixer.replaceText(
                         variantValue,
                         createTransformTemplate({
@@ -677,7 +709,7 @@ module.exports = {
                           isArrayContext: !isEmpty(remainingProps),
                         }),
                       );
-                    },
+                    }),
                   });
                 } catch (error) {
                   // Continue if error occurs
@@ -794,7 +826,7 @@ module.exports = {
                     data: {
                       property: Object.keys(sprinklesProps).join(', '),
                     },
-                    fix(fixer) {
+                    fix: withSprinklesImport((fixer) => {
                       return fixer.replaceText(
                         variantValue,
                         createTransformTemplate({
@@ -805,7 +837,7 @@ module.exports = {
                           isArrayContext: !(isEmpty(remainingProps) && variables.length === 0),
                         }),
                       );
-                    },
+                    }),
                   });
                 } catch (error) {
                   // Continue if error occurs
@@ -840,7 +872,7 @@ module.exports = {
                   data: {
                     property: targetProperties,
                   },
-                  fix(fixer) {
+                  fix: withSprinklesImport((fixer) => {
                     return fixer.replaceText(
                       functionBody,
                       createTransformTemplate({
@@ -850,7 +882,7 @@ module.exports = {
                         isArrayContext: !isEmpty(remainingProps),
                       }),
                     );
-                  },
+                  }),
                 });
               } catch (error) {
                 // Continue if error occurs
@@ -889,7 +921,7 @@ module.exports = {
                   data: {
                     property: Object.keys(sprinklesProps).join(', '),
                   },
-                  fix(fixer) {
+                  fix: withSprinklesImport((fixer) => {
                     return fixer.replaceText(
                       functionBody,
                       createTransformTemplate({
@@ -900,7 +932,7 @@ module.exports = {
                         isArrayContext: !(isEmpty(remainingProps) && variables.length === 0),
                       }),
                     );
-                  },
+                  }),
                 });
               } catch (error) {
                 // Continue if error occurs
@@ -935,7 +967,7 @@ module.exports = {
                       data: {
                         property: targetProperties,
                       },
-                      fix(fixer) {
+                      fix: withSprinklesImport((fixer) => {
                         return fixer.replaceText(
                           returnValue,
                           createTransformTemplate({
@@ -945,7 +977,7 @@ module.exports = {
                             isArrayContext: !isEmpty(remainingProps),
                           }),
                         );
-                      },
+                      }),
                     });
                   } catch (error) {
                     // Continue if error occurs
@@ -984,7 +1016,7 @@ module.exports = {
                       data: {
                         property: Object.keys(sprinklesProps).join(', '),
                       },
-                      fix(fixer) {
+                      fix: withSprinklesImport((fixer) => {
                         return fixer.replaceText(
                           returnValue,
                           createTransformTemplate({
@@ -995,7 +1027,7 @@ module.exports = {
                             isArrayContext: !(isEmpty(remainingProps) && variables.length === 0),
                           }),
                         );
-                      },
+                      }),
                     });
                   } catch (error) {
                     // Continue if error occurs
