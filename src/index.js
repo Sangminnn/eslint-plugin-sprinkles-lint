@@ -4,7 +4,7 @@ const noUseStyleDeclaredSprinkles = require("./rules/no-use-style-declared-sprin
 const plugin = {
   meta: {
     name: "eslint-plugin-sprinkles-lint",
-    version: "2.16.0",
+    version: "2.17.0",
   },
   rules: {
     "no-use-style-declared-sprinkles": noUseStyleDeclaredSprinkles,

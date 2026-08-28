@@ -229,6 +229,7 @@ module.exports = {
 |---|---|---|
 | `configPath` | `string` | Path to the exported sprinkles config (see STEP 1–3). |
 | `sprinklesImportSource` | `string` | Module specifier used when `--fix` has to add `import { sprinkles } from '...'` to a file that does not import it yet (e.g. `'@/styles/sprinkles.css'`). Without it, files that do not import `sprinkles` are reported but **not** auto-fixed. |
+| `hoistableOverrideProperties` | `string[]` | Properties the project knows are never set by any composed component base. When every movable property of an override object is in this list, `--fix` hoists it into `sprinkles()`; otherwise the case is only reported with an IDE suggestion (see [Autofix safety §2](#2-override-objects-composed-with-other-classes-no-autofix-by-default)). Default `[]`. |
 
 ```js
 "sprinkles-lint/no-use-style-declared-sprinkles": [
@@ -236,13 +237,14 @@ module.exports = {
   {
     configPath: './path/to/your/sprinkles.config.js',
     sprinklesImportSource: '@/styles/sprinkles.css',
+    hoistableOverrideProperties: ['minHeight', 'cursor', 'objectFit'],
   },
 ],
 ```
 
 ## Autofix safety
 
-Detection always runs. For `style(...)` calls, `--fix` is only offered when applying it keeps the file compiling and rendering the same. See the known gap below for `recipe` / `styleVariants`.
+Detection always runs. For `style(...)` calls, `--fix` is only offered when applying it keeps the file compiling and rendering the same — unless the project opts a property in via `hoistableOverrideProperties`. See the known gap below for `recipe` / `styleVariants`.
 
 ### 1. `sprinkles` import
 
@@ -252,7 +254,7 @@ Replacing `style({...})` with `sprinkles({...})` in a file that never imports `s
 - inserts `import { sprinkles } from '<sprinklesImportSource>'` together with the fix when the option is set,
 - reports without a fix otherwise.
 
-### 2. Override objects composed with other classes (no autofix)
+### 2. Override objects composed with other classes (no autofix by default)
 
 ```js
 // Button base: sprinkles({ width: '100%' })
@@ -265,17 +267,26 @@ export const removeButton = style([
 
 `width: 'auto'` exists in sprinkles, but it must **not** be hoisted into the `sprinkles()` call. A sprinkles atom and a local `style()` rule are both single-class selectors with equal specificity, so the winner is decided by sheet order: local `style()` rules are emitted after the sprinkles sheet and win, while atoms are ordered by their position in the scale array. Moving the property flips the cascade — in the case above the button stretched to full width.
 
-For `style([sprinkles(...), { ... }])` the rule reports `manualSeparationRequired` and leaves the code untouched. Move the property yourself only after confirming the class is not composed with another class that sets the same property.
+**Why `--fix` skips this shape.** A local `style()` rule is emitted after the sprinkles sheet, so for normal declarations it beats an atom for the same property. Once the value is moved into `sprinkles()` it becomes an atom too: the contest is now decided by the order of the scale array, and the author has lost the only way to say "this must win". The competing class (a component base, for example) lives in another file the rule cannot see — and a file that overrides a composed class looks byte-for-byte identical to one that simply forgot to use sprinkles. So for `style([sprinkles(...), { ... }])` the rule reports `manualSeparationRequired` and, by default, leaves the code untouched.
 
-**Known gap:** the same hoisting is still auto-fixed inside `recipe({ base: [...] })`, `recipe` variants and `styleVariants` arrays. Review `--fix` output in those places (or use the cascade-layer setup below, which makes the move safe everywhere).
+Two ways to move the property without retyping it:
+
+- **IDE suggestion** — the report carries a `hoistToSprinkles` quick-fix (when the file imports `sprinkles` or `sprinklesImportSource` is set — the same precondition as `--fix`). `--fix` never applies suggestions; you check the call sites, then apply it per case from your editor.
+- **`hoistableOverrideProperties`** — if the project knows a property is never declared by any component base (`minHeight`, `objectFit`, `cursor`, …), list it in the option and `--fix` hoists it automatically. Only override objects whose *every* movable property is listed are fixed; the rest stay suggestions. The default is an empty list, so nothing moves unless the project says so.
+
+Neither path is offered for shapes the transformation cannot handle losslessly — more than one override object, a property declared on both sides, or a spread inside `sprinkles()`. Those are reported only.
+
+**Known gap:** the same hoisting is still auto-fixed inside `recipe({ base: [...] })`, `recipe` variants and `styleVariants` arrays, and `hoistableOverrideProperties` has no effect there. Review `--fix` output in those places.
 
 ### 3. Standalone `style({...})` (autofixed, verify composition)
 
 `style({ width: 'auto' })` → `sprinkles({ width: 'auto' })` is still auto-fixed. Whether that class is later composed with another component's base class cannot be known from the file, so check call sites that pass it as `className` to a component with its own `width`.
 
-### Recommended: put sprinkles in a cascade layer
+### Cascade layers: what they do and do not solve
 
-Both risks above disappear when sprinkles atoms live in a `@layer`: unlayered styles (your local `style()` rules) always win over layered ones, regardless of sheet order.
+Putting sprinkles atoms in a `@layer` guarantees that unlayered normal declarations — your local `style()` rules — win over atoms regardless of sheet order (`!important` reverses layer order, so it is the one exception). That makes the *unmoved* override pattern (`style([sprinkles(...), { width: 'auto' }])`) robust.
+
+It does **not** make hoisting safe: once the override is moved into `sprinkles()`, both competitors are atoms in the same layer and the winner is again the scale-array order. Layers are therefore not a substitute for the guard above or for `hoistableOverrideProperties`.
 
 ```ts
 // sprinkles.css.ts
@@ -332,7 +343,7 @@ const testStyle = sprinkles({
 });
 ```
 
-### Case 2 - Using style with sprinkles in array (reported, not autofixed)
+### Case 2 - Using style with sprinkles in array (reported, not autofixed by default)
 
 ```js
 // as-is
@@ -360,9 +371,9 @@ const testStyle = style([
 ]);
 ```
 
-See [Autofix safety](#2-override-objects-composed-with-other-classes-no-autofix) for why this case is not auto-fixed.
+See [Autofix safety](#2-override-objects-composed-with-other-classes-no-autofix-by-default) for why this case is not auto-fixed.
 
-### Case 3 - Using style with sprinkles in array, but actually doesn't need style object (reported, not autofixed)
+### Case 3 - Using style with sprinkles in array, but actually doesn't need style object (reported, not autofixed by default)
 
 ```js
 // as-is

@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.17.0
+
+Default behavior unchanged; the `manualSeparationRequired` cases from 2.16.0 become actionable.
+
+### Added
+
+- `manualSeparationRequired` reports now carry a `hoistToSprinkles` IDE suggestion (with import insertion when `sprinklesImportSource` is set). `--fix` still never applies it.
+- `hoistableOverrideProperties` option: override-object properties the project declares as never set by a composed base are hoisted by `--fix`. Default `[]`.
+- Neither the suggestion nor the allowlist applies to shapes the merge cannot transform losslessly (several override objects, a property on both sides, a spread inside `sprinkles()`); those stay report-only.
+
+### Docs
+
+- Corrected the 2.16.0 README claim that a `@layer` setup removes the cascade risk. Layers protect the unmoved override, but a hoisted value becomes an atom competing in the same layer, so they do not make the move safe.
+
 ## 2.16.0
 
 Autofix behavior change for `no-use-style-declared-sprinkles`. Detection is unchanged; the set of cases that receive an automatic fix is narrower.
