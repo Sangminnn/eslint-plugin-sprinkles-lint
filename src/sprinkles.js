@@ -3,6 +3,7 @@ const sprinklesConfig = {
   display: ['none', 'flex', 'inline-flex', 'block', 'inline', 'grid'],
   flexDirection: ['row', 'column'],
   width: ['100%', 'auto', 'fit-content'],
+  minHeight: ['100vh'],
   textAlign: ['left', 'center', 'right'],
   px: [16, 8, 12, 24],
   py: [13, 8, 12, 24],

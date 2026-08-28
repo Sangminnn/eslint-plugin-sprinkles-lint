@@ -61,6 +61,10 @@ module.exports = {
           sprinklesImportSource: {
             type: 'string',
           },
+          hoistableOverrideProperties: {
+            type: 'array',
+            items: { type: 'string' },
+          },
         },
         additionalProperties: false,
       },
@@ -69,9 +73,11 @@ module.exports = {
       useSprinkles: "🚨 '{{ property }}' is defined in Sprinkles. Use sprinkles property instead.",
       manualSeparationRequired:
         "'{{ property }}' can move to Sprinkles, but it sits in an override object composed with other classes. Moving it changes cascade order — move manually and verify the rendered result.",
+      hoistToSprinkles: "Move '{{ property }}' into sprinkles() (verify this class is not overriding a composed class first)",
       removeStyle: 'Style wrapper should be removed',
     },
     fixable: 'code',
+    hasSuggestions: true,
   },
 
   create(context) {
@@ -221,17 +227,49 @@ module.exports = {
               if (nonSprinklesObject) {
                 const { sprinklesProps: movableProps } = separateWithConfig(nonSprinklesProperties);
 
-                if (!isEmpty(movableProps)) {
+                if (isEmpty(movableProps)) {
+                  return;
+                }
+
+                const movableNames = Object.keys(movableProps).join(', ');
+                const reportManualSeparation = (suggestionFix) =>
                   context.report({
                     node,
                     messageId: 'manualSeparationRequired',
                     data: {
-                      property: Object.keys(movableProps).join(', '),
+                      property: movableNames,
                     },
+                    ...(suggestionFix ? { suggest: [{ messageId: 'hoistToSprinkles', data: { property: movableNames }, fix: suggestionFix }] } : {}),
                   });
+
+                // The merged template is only trustworthy for the one shape the merge path handles: a single
+                // override object, no property declared on both sides (the merge is first-wins, so the override
+                // value would be dropped), and a sprinkles() call the separator can read (a spread makes it
+                // return nothing and the template collapses to `{}`).
+                const propertyName = (prop) => (prop.key ? prop.key.name || prop.key.value : null);
+                const sprinklesNames = new Set(sprinklesProperties.map(propertyName).filter(Boolean));
+                const hasSingleOverrideObject = styleArgument.elements.filter(isObject).length === 1;
+                const hasOverlappingProperty = nonSprinklesProperties.some((prop) => sprinklesNames.has(propertyName(prop)));
+                const merged = separateWithConfig([...sprinklesProperties, ...nonSprinklesProperties]);
+                const canHoist = hasSingleOverrideObject && !hasOverlappingProperty && !isEmpty(merged.sprinklesProps);
+
+                if (!canHoist) {
+                  reportManualSeparation(undefined);
+                  return;
                 }
 
-                return;
+                // The plugin cannot see component bases, but the project can: properties it declares as never
+                // set by a composed base are safe to hoist, so they take the regular autofix path below.
+                const hoistableProperties = new Set(options.hoistableOverrideProperties || []);
+                const allMovableAreHoistable = Object.keys(movableProps).every((name) => hoistableProperties.has(name));
+
+                if (!allMovableAreHoistable) {
+                  // The transformation is mechanical; only the decision to apply it needs the call sites, so it is
+                  // offered as an IDE suggestion that never runs under --fix. (ESLint builds suggestion fixes eagerly.)
+                  const hoisted = createTransformTemplate({ sourceCode, variables, sprinklesProps: merged.sprinklesProps, remainingProps: merged.remainingProps });
+                  reportManualSeparation(withSprinklesImport((fixer) => fixer.replaceText(node, hoisted)));
+                  return;
+                }
               }
 
               const allProperties = [...sprinklesProperties, ...nonSprinklesProperties];

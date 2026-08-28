@@ -29,6 +29,10 @@ const lint = async (code, ruleOptions = {}, { fix = true } = {}) => {
   return result;
 };
 
+// ESLint merges a suggestion's fixes into one { range, text }; applying it is a plain splice.
+const applySuggestion = (code, suggestion) => code.slice(0, suggestion.fix.range[0]) + suggestion.fix.text + code.slice(suggestion.fix.range[1]);
+const collapseWhitespace = (text) => text.replace(/\s+/g, ' ').trim();
+
 const cases = [];
 const test = (name, run) => cases.push({ name, run });
 
@@ -176,6 +180,140 @@ test('T13. directive prologue stays first when the import is inserted', async ()
   });
 
   assert.ok(result.output.startsWith(`'use client';\n${SPRINKLES_IMPORT}`), `unexpected output:\n${result.output}`);
+});
+
+// --- Guard follow-up: the blocked move is offered as an IDE suggestion (never under --fix) ---
+
+test('S1 (brief T7). guarded case carries a hoistToSprinkles suggestion; applying it hoists the prop', async () => {
+  const code = `${SPRINKLES_IMPORT}
+const container = style([
+  sprinkles({ display: 'flex' }),
+  { minHeight: '100vh' },
+]);`;
+  const fixed = await lint(code);
+  assert.strictEqual(fixed.output, undefined, '--fix must not touch it');
+
+  const result = await lint(code, {}, { fix: false });
+  assert.strictEqual(result.messages.length, 1);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(result.messages[0].suggestions.length, 1);
+  assert.strictEqual(result.messages[0].suggestions[0].messageId, 'hoistToSprinkles');
+
+  const applied = applySuggestion(code, result.messages[0].suggestions[0]);
+  assert.strictEqual(
+    collapseWhitespace(applied),
+    collapseWhitespace(`${SPRINKLES_IMPORT}\nconst container = sprinkles({ display: 'flex', minHeight: '100vh' });`),
+  );
+});
+
+test('S4 (brief T10). regression case never moves under --fix, with or without the suggestion', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}
+const removeButton = style([
+  sprinkles({ marginRight: 22 }),
+  { width: 'auto', selectors: { '&:disabled': { cursor: 'default' } } },
+]);`);
+
+  assert.strictEqual(result.output, undefined);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(result.messages[0].suggestions.length, 1);
+});
+
+test('S5 (brief T11). applying the suggestion also inserts the import when sprinklesImportSource is set', async () => {
+  const code = `const container = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
+  const result = await lint(code, { sprinklesImportSource: '@/styles/sprinkles.css' }, { fix: false });
+
+  assert.strictEqual(result.messages[0].suggestions.length, 1);
+  const applied = applySuggestion(code, result.messages[0].suggestions[0]);
+  assert.ok(applied.startsWith(SPRINKLES_IMPORT), `unexpected output:\n${applied}`);
+  assert.ok(applied.includes(`minHeight: '100vh'`));
+});
+
+test('S5-b. no import and no sprinklesImportSource → report without suggestion (a suggestion needs a fix)', async () => {
+  const result = await lint(`const container = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`, {}, { fix: false });
+
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(result.messages[0].suggestions, undefined);
+});
+
+// --- hoistableOverrideProperties: properties the project declares safe take the real --fix path ---
+
+test('S2 (brief T8). all movable props allowlisted → real fix, wrapper removed', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}
+const container = style([
+  sprinkles({ display: 'flex' }),
+  { minHeight: '100vh' },
+]);`,
+    { hoistableOverrideProperties: ['minHeight'] },
+  );
+
+  assert.notStrictEqual(result.output, undefined, 'allowlisted prop must be auto-fixed');
+  assert.ok(result.output.includes(`minHeight: '100vh'`));
+  assert.ok(!result.output.includes('style(['), `wrapper should be gone:\n${result.output}`);
+  assert.strictEqual(result.messages.length, 0);
+});
+
+test('S3 (brief T9). only some movable props allowlisted → no fix, suggestion instead', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}
+const box = style([sprinkles({ display: 'flex' }), { minHeight: '100vh', width: 'auto' }]);`,
+    { hoistableOverrideProperties: ['minHeight'] },
+  );
+
+  assert.strictEqual(result.output, undefined);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.ok(result.messages[0].message.includes('width'));
+
+  const reported = await lint(
+    `${SPRINKLES_IMPORT}
+const box = style([sprinkles({ display: 'flex' }), { minHeight: '100vh', width: 'auto' }]);`,
+    { hoistableOverrideProperties: ['minHeight'] },
+    { fix: false },
+  );
+  assert.strictEqual(reported.messages[0].suggestions.length, 1);
+});
+
+test('S3-b. allowlist does not unlock the regression case unless width is declared', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}
+const removeButton = style([sprinkles({ marginRight: 22 }), { width: 'auto' }]);`,
+    { hoistableOverrideProperties: ['minHeight', 'cursor'] },
+  );
+
+  assert.strictEqual(result.output, undefined);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+});
+
+// --- Shapes the merge path cannot transform losslessly → report only, no suggestion, allowlist ignored ---
+
+const assertReportOnly = async (code, allowlist) => {
+  const fixed = await lint(code, { hoistableOverrideProperties: allowlist });
+  assert.strictEqual(fixed.output, undefined, 'must not be auto-fixed even when allowlisted');
+  assert.strictEqual(fixed.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(fixed.messages[0].suggestions, undefined, 'must not offer a lossy suggestion');
+};
+
+test('S6. same property on both sides → the override value would be dropped → report only', async () => {
+  await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ width: '100%' }), { width: 'auto' }]);`, ['width']);
+});
+
+test('S7. spread inside sprinkles() → template would collapse → report only', async () => {
+  await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ ...base, display: 'flex' }), { minHeight: '100vh' }]);`, ['minHeight']);
+});
+
+test('S8. more than one override object → later objects would be dropped → report only', async () => {
+  await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }, { zIndex: 3 }]);`, ['minHeight']);
+});
+
+test('S9. external variables in the array survive both the suggestion and the allowlist fix', async () => {
+  const code = `${SPRINKLES_IMPORT}\nconst b = style([typography, sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
+
+  const reported = await lint(code, {}, { fix: false });
+  const applied = applySuggestion(code, reported.messages[0].suggestions[0]);
+  assert.strictEqual(collapseWhitespace(applied), collapseWhitespace(`${SPRINKLES_IMPORT}\nconst b = style([ typography, sprinkles({ display: 'flex', minHeight: '100vh' }) ]);`));
+
+  const fixed = await lint(code, { hoistableOverrideProperties: ['minHeight'] });
+  assert.strictEqual(collapseWhitespace(fixed.output), collapseWhitespace(applied));
 });
 
 // --- Fix 3: the message only names props that are about to move into sprinkles() ---
