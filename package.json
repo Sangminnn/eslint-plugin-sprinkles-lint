@@ -6,8 +6,12 @@
   "exports": {
     ".": "./src/index.js"
   },
+  "bin": {
+    "sprinkles-lint-analyze": "bin/sprinkles-lint-analyze.js"
+  },
   "files": [
     "src",
+    "bin",
     "README.md",
     "LICENSE",
     "eslint.config.js",
@@ -15,12 +19,13 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "test": "node src/tests/comprehensive.test.js && node src/tests/flex-conversion.test.js && node src/tests/autofix-safety.test.js",
+    "test": "node src/tests/comprehensive.test.js && node src/tests/flex-conversion.test.js && node src/tests/autofix-safety.test.js && node src/tests/analyzer.test.js",
     "test:basic": "node src/tests/sprinkles-rules.test.js",
     "test:flex": "node src/tests/flex-conversion.test.js",
     "test:autofix": "node src/tests/autofix-safety.test.js",
     "test:transform": "node src/tests/transformation.test.js",
-    "test:live": "node src/tests/live-transformation.test.js"
+    "test:live": "node src/tests/live-transformation.test.js",
+    "test:analyzer": "node src/tests/analyzer.test.js"
   },
   "keywords": [
     "eslint",
@@ -37,10 +42,19 @@
     "eslint": "^8.0.0"
   },
   "peerDependencies": {
-    "eslint": ">=8.0.0"
+    "eslint": ">=8.0.0",
+    "typescript": ">=4.8"
   },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Sangminnn/eslint-plugin-sprinkles-lint.git"
+  },
+  "devDependencies": {
+    "typescript": "^6"
+  },
+  "peerDependenciesMeta": {
+    "typescript": {
+      "optional": true
+    }
   }
 }
