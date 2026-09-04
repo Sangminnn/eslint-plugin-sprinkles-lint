@@ -5,8 +5,11 @@
  */
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { ESLint } = require('eslint');
+const { sha256 } = require('../analyzer/analyze');
 
 const pluginPath = path.resolve(__dirname, '../..');
 const SPRINKLES_IMPORT = `import { sprinkles } from '@/styles/sprinkles.css';`;
@@ -314,6 +317,162 @@ test('S9. external variables in the array survive both the suggestion and the al
 
   const fixed = await lint(code, { hoistableOverrideProperties: ['minHeight'] });
   assert.strictEqual(collapseWhitespace(fixed.output), collapseWhitespace(applied));
+});
+
+// --- provenSoloClassesPath: analyzer-proven solo classes take the real --fix path ---
+
+const VIRTUAL_CSS_PATH = 'src/tests/virtual/proven-case.css.ts';
+const PROVEN_CODE = `${SPRINKLES_IMPORT}
+export const container = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
+
+const writeArtifact = (artifact) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sprinkles-proven-'));
+  const artifactPath = path.join(dir, 'proven-solo-classes.json');
+  fs.writeFileSync(artifactPath, JSON.stringify(artifact));
+  return artifactPath;
+};
+
+const provenArtifact = (overrides = {}) => ({
+  version: 1,
+  sourceHash: 'x',
+  tsconfigLoaded: true,
+  // a real on-disk input so verification is actually exercised
+  inputs: { 'package.json': sha256(fs.readFileSync('package.json', 'utf8')) },
+  provenSoloClasses: { [VIRTUAL_CSS_PATH]: ['container'] },
+  unproven: {},
+  unresolvedImports: [],
+  unscannedImports: [],
+  ...overrides,
+});
+
+const lintVirtual = async (code, ruleOptions, { fix = true } = {}) => {
+  const eslint = new ESLint({
+    fix,
+    useEslintrc: false,
+    overrideConfig: {
+      parserOptions: { ecmaVersion: 2022, sourceType: 'module' },
+      plugins: ['sprinkles-lint'],
+      rules: {
+        'sprinkles-lint/no-use-style-declared-sprinkles': ['error', { configPath: './src/sprinkles.js', ...ruleOptions }],
+      },
+    },
+    resolvePluginsRelativeTo: pluginPath,
+  });
+  const [result] = await eslint.lintText(code, { filePath: VIRTUAL_CSS_PATH });
+  return result;
+};
+
+test('P1 (plan T12). proven-solo class → override prop is really fixed', async () => {
+  const artifactPath = writeArtifact(provenArtifact());
+  const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+
+  assert.notStrictEqual(result.output, undefined, 'proven class must be auto-fixed');
+  assert.ok(result.output.includes(`minHeight: '100vh'`));
+  assert.ok(!result.output.includes('style(['), `wrapper should be gone:\n${result.output}`);
+  assert.strictEqual(result.messages.length, 0);
+});
+
+test('P2 (plan T13). class not in the artifact → suggestion behavior unchanged', async () => {
+  const artifactPath = writeArtifact(provenArtifact({ provenSoloClasses: { [VIRTUAL_CSS_PATH]: ['somethingElse'] } }));
+  const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+
+  assert.strictEqual(result.output, undefined);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+});
+
+test('P3 (plan T14). artifact file missing → 2.17.0 behavior (backward compatible)', async () => {
+  const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: '/nonexistent/proven.json' });
+
+  assert.strictEqual(result.output, undefined);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+});
+
+test('P4 (plan T15). stale input hash on disk → artifact refused, warning emitted', async () => {
+  const artifactPath = writeArtifact(provenArtifact({ inputs: { 'package.json': sha256('outdated content') } }));
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+    assert.strictEqual(result.output, undefined, 'stale artifact must not unlock the fix');
+    assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some((message) => message.includes('stale')), 'should warn about the stale artifact');
+});
+
+test('P4-b. analyzer reported unresolved imports → artifact refused, warning emitted', async () => {
+  const artifactPath = writeArtifact(provenArtifact({ unresolvedImports: [{ file: 'a.tsx', specifier: '@x/ghost.css' }] }));
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+    assert.strictEqual(result.output, undefined, 'incomplete import graph must not unlock the fix');
+    assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some((message) => message.includes('unresolved')), 'should warn about the incomplete graph');
+});
+
+test('P7. artifact with empty inputs → refused (staleness unverifiable)', async () => {
+  const artifactPath = writeArtifact(provenArtifact({ inputs: {} }));
+  const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+
+  assert.strictEqual(result.output, undefined);
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+});
+
+test('P7-b. artifact generated without a tsconfig → refused', async () => {
+  const artifactPath = writeArtifact(provenArtifact({ tsconfigLoaded: false }));
+  const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+
+  assert.strictEqual(result.output, undefined);
+});
+
+test('P8. corrupt artifact → warning, suggestion fallback', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sprinkles-proven-'));
+  const artifactPath = path.join(dir, 'proven-solo-classes.json');
+  fs.writeFileSync(artifactPath, '{ not json');
+
+  const warnings = [];
+  const originalWarn = console.warn;
+  console.warn = (message) => warnings.push(String(message));
+  try {
+    const result = await lintVirtual(PROVEN_CODE, { provenSoloClassesPath: artifactPath });
+    assert.strictEqual(result.output, undefined);
+    assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  } finally {
+    console.warn = originalWarn;
+  }
+  assert.ok(warnings.some((message) => message.includes('could not read')), 'corrupt artifact must warn');
+});
+
+test('P6. a nested declaration sharing a proven name does not inherit the proof', async () => {
+  const code = `${SPRINKLES_IMPORT}
+const makeStyle = () => {
+  const container = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);
+  return container;
+};`;
+  const artifactPath = writeArtifact(provenArtifact());
+  const result = await lintVirtual(code, { provenSoloClassesPath: artifactPath });
+
+  assert.strictEqual(result.output, undefined, 'only module-level exports may use the proof');
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+});
+
+test('P5. proven class still cannot bypass the lossless-transform preconditions', async () => {
+  const code = `${SPRINKLES_IMPORT}
+export const container = style([sprinkles({ width: '100%' }), { width: 'auto' }]);`;
+  const artifactPath = writeArtifact(provenArtifact());
+  const result = await lintVirtual(code, { provenSoloClassesPath: artifactPath });
+
+  assert.strictEqual(result.output, undefined, 'duplicate-property merge loss is independent of solo usage');
+  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
 });
 
 // --- Fix 3: the message only names props that are about to move into sprinkles() ---

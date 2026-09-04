@@ -1,3 +1,4 @@
+const fs = require('fs');
 const path = require('path');
 const {
   isEmpty,
@@ -15,6 +16,83 @@ const {
   hasNestedSelectors,
 } = require('./utils');
 const { getSprinklesConfig } = require('./sprinkles-discovery');
+const { sha256 } = require('../analyzer/analyze');
+
+// provenSoloClassesPath artifact (built by sprinkles-lint-analyze), cached and verified once per
+// path+mtime. An artifact is refused outright — with a single warning — when the analyzer reported
+// unresolved or unscanned imports, or when any input file on disk no longer matches its recorded
+// hash (the proof is a statement about other files, so any consumer edit invalidates it).
+const provenArtifactCache = new Map();
+const warnedArtifactPaths = new Set();
+// Long-lived processes (editor LSP, watch mode) must not keep serving a proof after a consumer
+// edit, so a passed verification only holds for a short window before the inputs are re-hashed.
+const VERIFICATION_TTL_MS = 10_000;
+
+const verifyProvenArtifact = (artifact, artifactPath) => {
+  if (!artifact || artifact.version !== 1) {
+    return { usable: false, warning: `unsupported artifact version in ${artifactPath}` };
+  }
+  if ((artifact.unresolvedImports || []).length > 0 || (artifact.unscannedImports || []).length > 0) {
+    return {
+      usable: false,
+      warning: `artifact ${artifactPath} reports unresolved or unscanned imports — the import graph is incomplete, so no class is treated as proven`,
+    };
+  }
+  if (artifact.tsconfigLoaded !== true) {
+    return { usable: false, warning: `artifact ${artifactPath} was generated without a tsconfig — aliases were unresolvable, so no class is treated as proven` };
+  }
+  if (!artifact.inputs || Object.keys(artifact.inputs).length === 0) {
+    return { usable: false, warning: `artifact ${artifactPath} records no inputs — staleness cannot be checked, so no class is treated as proven` };
+  }
+
+  const baseDir = artifact.root && fs.existsSync(artifact.root) ? artifact.root : process.cwd();
+  for (const [relativePath, recordedHash] of Object.entries(artifact.inputs || {})) {
+    let currentHash = null;
+    try {
+      currentHash = sha256(fs.readFileSync(path.resolve(baseDir, relativePath), 'utf8'));
+    } catch (error) {
+      currentHash = null;
+    }
+    if (currentHash !== recordedHash) {
+      return {
+        usable: false,
+        warning: `proven-solo artifact is stale (${relativePath} changed since analysis) — re-run sprinkles-lint-analyze. Falling back to suggestions.`,
+      };
+    }
+  }
+
+  return { usable: true, baseDir };
+};
+
+const loadProvenSoloArtifact = (artifactPath) => {
+  try {
+    const stats = fs.statSync(artifactPath);
+    const cached = provenArtifactCache.get(artifactPath);
+    if (cached && cached.mtimeMs === stats.mtimeMs && Date.now() - cached.verifiedAt < VERIFICATION_TTL_MS) {
+      return cached;
+    }
+
+    const artifact = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+    const verdict = verifyProvenArtifact(artifact, artifactPath);
+    if (!verdict.usable && verdict.warning && !warnedArtifactPaths.has(artifactPath)) {
+      warnedArtifactPaths.add(artifactPath);
+      console.warn(`[sprinkles-lint] ${verdict.warning}`);
+    }
+    if (verdict.usable) {
+      warnedArtifactPaths.delete(artifactPath);
+    }
+
+    const entry = { mtimeMs: stats.mtimeMs, verifiedAt: Date.now(), artifact: verdict.usable ? artifact : null, baseDir: verdict.baseDir };
+    provenArtifactCache.set(artifactPath, entry);
+    return entry;
+  } catch (error) {
+    if (error.code !== 'ENOENT' && !warnedArtifactPaths.has(artifactPath)) {
+      warnedArtifactPaths.add(artifactPath);
+      console.warn(`[sprinkles-lint] could not read proven-solo artifact ${artifactPath}: ${error.message}`);
+    }
+    return { mtimeMs: null, verifiedAt: 0, artifact: null, baseDir: null };
+  }
+};
 
 module.exports = {
   meta: {
@@ -65,6 +143,9 @@ module.exports = {
             type: 'array',
             items: { type: 'string' },
           },
+          provenSoloClassesPath: {
+            type: 'string',
+          },
         },
         additionalProperties: false,
       },
@@ -92,6 +173,32 @@ module.exports = {
     const { sprinklesConfig, shorthands } = config;
 
     const sourceCode = context.getSourceCode();
+
+    // Classes the analyzer proved are only ever used standalone. Resolved lazily at the first
+    // guard hit; an unusable or stale artifact yields null, falling back to suggestion-only behavior.
+    let provenSoloClassesCache;
+    const resolveProvenSoloClasses = () => {
+      if (!options.provenSoloClassesPath) {
+        return null;
+      }
+
+      const artifactPath = path.resolve(process.cwd(), options.provenSoloClassesPath);
+      const { artifact, baseDir } = loadProvenSoloArtifact(artifactPath);
+      if (!artifact) {
+        return null;
+      }
+
+      const absoluteFilename = path.resolve(process.cwd(), context.getFilename());
+      const relativeFilename = path.relative(baseDir || process.cwd(), absoluteFilename).split(path.sep).join('/');
+      return new Set(artifact.provenSoloClasses?.[relativeFilename] || []);
+    };
+    const getProvenSoloClasses = () => {
+      if (provenSoloClassesCache === undefined) {
+        provenSoloClassesCache = resolveProvenSoloClasses();
+      }
+      return provenSoloClassesCache;
+    };
+
     const separateWithConfig = (properties) =>
       separateProps({
         sprinklesConfig,
@@ -258,12 +365,25 @@ module.exports = {
                   return;
                 }
 
-                // The plugin cannot see component bases, but the project can: properties it declares as never
-                // set by a composed base are safe to hoist, so they take the regular autofix path below.
+                // Usage-aware proof: the analyzer showed this class is only ever used standalone,
+                // so no competing class can sit on the same element and hoisting cannot flip a cascade.
+                // The artifact only lists module-level exports; a nested declaration that happens to
+                // share the name must not inherit the proof.
+                const declarator = node.parent;
+                const declarationList = declarator && declarator.type === 'VariableDeclarator' ? declarator.parent : null;
+                const exportStatement = declarationList && declarationList.type === 'VariableDeclaration' ? declarationList.parent : null;
+                const isModuleLevelExport =
+                  exportStatement && exportStatement.type === 'ExportNamedDeclaration' && exportStatement.parent.type === 'Program';
+                const declaredName = isModuleLevelExport && declarator.id.type === 'Identifier' ? declarator.id.name : null;
+                const provenSoloClasses = getProvenSoloClasses();
+                const isProvenSolo = Boolean(provenSoloClasses && declaredName && provenSoloClasses.has(declaredName));
+
+                // Escape hatch: the plugin cannot see component bases, but the project can — properties it
+                // declares as never set by a composed base also take the regular autofix path below.
                 const hoistableProperties = new Set(options.hoistableOverrideProperties || []);
                 const allMovableAreHoistable = Object.keys(movableProps).every((name) => hoistableProperties.has(name));
 
-                if (!allMovableAreHoistable) {
+                if (!isProvenSolo && !allMovableAreHoistable) {
                   // The transformation is mechanical; only the decision to apply it needs the call sites, so it is
                   // offered as an IDE suggestion that never runs under --fix. (ESLint builds suggestion fixes eagerly.)
                   const hoisted = createTransformTemplate({ sourceCode, variables, sprinklesProps: merged.sprinklesProps, remainingProps: merged.remainingProps });
