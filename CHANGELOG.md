@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.18.0
+
+### Added
+
+- `sprinkles-lint-analyze` bin: walks the project's import graph (TypeScript >= 4.8 required; tsconfig `paths`, re-exports, star-barrels, `require()`/dynamic imports and intra-css-file composition all handled) and emits an artifact listing every css.ts class proven to be used only standalone — the proof direction is "solo usage proven → hoist", never "composition not detected → hoist". Anything the analyzer cannot resolve is recorded in the artifact instead of being silently skipped.
+- `provenSoloClassesPath` rule option: classes proven by the artifact take the real `--fix` path with no allowlist. Missing artifact → 2.17.0 behavior; an artifact with unresolved/unscanned imports, generated without a tsconfig, without recorded inputs, unreadable, or whose recorded inputs no longer match the files on disk, is refused with a warning (re-verified periodically in long-lived processes). Lossless-transform preconditions still apply, and only module-level exports can consume a proof.
+- `hoistableOverrideProperties` remains as a property-level escape hatch; the artifact is consulted first.
+
 ## 2.17.0
 
 Default behavior unchanged; the `manualSeparationRequired` cases from 2.16.0 become actionable.
