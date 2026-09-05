@@ -19,6 +19,7 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const nodeModule = require('module');
 
 const SOURCE_EXTENSION_PATTERN = /\.(ts|tsx|js|jsx|mjs|cjs|mts|cts)$/;
 const DEFAULT_EXCLUDED_DIRECTORIES = new Set(['node_modules', 'dist', 'build', 'coverage', 'storybook-static', '.git', '.next', '.turbo', '.yarn', '.pnpm-store']);
@@ -50,6 +51,91 @@ const globToRegExp = (glob) => {
     .replace(new RegExp(DOUBLE_STAR_DIR, 'g'), '(?:.*/)?')
     .replace(new RegExp(DOUBLE_STAR, 'g'), '.*');
   return new RegExp(`(^|/)${escaped}($|/)`);
+};
+
+// Extensions that cannot export a vanilla-extract class. A specifier ending in `.css` that TypeScript
+// failed to resolve is a plain stylesheet: had a `<name>.css.ts` existed there, resolution would have
+// found it (that substitution is what makes `@/styles/sprinkles.css` a graph edge).
+const NON_MODULE_ASSET_PATTERN =
+  /\.(css|scss|sass|less|styl|svg|png|jpe?g|gif|webp|avif|ico|bmp|woff2?|ttf|otf|eot|mp[34]|webm|wav|txt|md|json|ya?ml|graphql|gql)$/i;
+
+// `@scope/name` or `name`, optionally with a subpath. `@/foo` (empty scope) and `~/foo` are not
+// package names — they are build-tool aliases, so a resolution failure there is a real graph hole.
+const SCOPED_PACKAGE_PATTERN = /^@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*(\/.*)?$/i;
+const UNSCOPED_PACKAGE_PATTERN = /^[a-z0-9][a-z0-9._-]*(\/.*)?$/i;
+
+const isBuiltinSpecifier = (specifier) => specifier.startsWith('node:') || nodeModule.isBuiltin(specifier);
+const isRelativeSpecifier = (specifier) => specifier.startsWith('./') || specifier.startsWith('../') || specifier === '.' || specifier === '..';
+const isPackageSpecifier = (specifier) =>
+  specifier.startsWith('@') ? SCOPED_PACKAGE_PATTERN.test(specifier) : UNSCOPED_PACKAGE_PATTERN.test(specifier);
+
+/** Matcher for the tsconfig `paths` patterns, so a declared alias that fails to resolve stays a hole. */
+const createTsconfigPathMatcher = (compilerOptions) => {
+  const patterns = Object.keys(compilerOptions.paths || {}).map((pattern) => {
+    const escaped = pattern.replace(/[.+^${}()|[\]\\?]/g, '\\$&').replace(/\*/g, '.*');
+    return new RegExp(`^${escaped}$`);
+  });
+  return (specifier) => patterns.some((pattern) => pattern.test(specifier));
+};
+
+const packageNameOf = (specifier) => {
+  const segments = specifier.split('/');
+  return specifier.startsWith('@') ? segments.slice(0, 2).join('/') : segments[0];
+};
+
+/**
+ * A package-shaped specifier is only external when the package is really there. Otherwise it is a
+ * build-tool alias (an undeclared `@components/*`, or a `baseUrl`-relative import such as
+ * `components/Foo`) that may point at project code, and dropping it would grant proof by silence.
+ */
+const createInstalledPackageChecker = (rootDir) => {
+  const declared = new Set();
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(rootDir, 'package.json'), 'utf8'));
+    for (const field of ['dependencies', 'devDependencies', 'peerDependencies', 'optionalDependencies']) {
+      for (const name of Object.keys(manifest[field] || {})) declared.add(name);
+    }
+  } catch (error) {
+    // No manifest at the analysis root — fall back to node_modules lookups alone.
+  }
+
+  const cache = new Map();
+  return (specifier, containingFile) => {
+    const packageName = packageNameOf(specifier);
+    if (declared.has(packageName)) return true;
+
+    const cacheKey = `${path.dirname(containingFile)}\u0000${packageName}`;
+    if (cache.has(cacheKey)) return cache.get(cacheKey);
+
+    let found = false;
+    let directory = path.dirname(containingFile);
+    for (;;) {
+      if (fs.existsSync(path.join(directory, 'node_modules', packageName))) {
+        found = true;
+        break;
+      }
+      const parent = path.dirname(directory);
+      if (parent === directory) break;
+      directory = parent;
+    }
+    cache.set(cacheKey, found);
+    return found;
+  };
+};
+
+/**
+ * Why an unresolved specifier can be dropped from the graph without weakening the proof.
+ * Returns null when it cannot — those are recorded and make the rule refuse the artifact.
+ */
+const ignoredImportReason = (specifier, containingFile, { matchesTsconfigPath, isInstalledPackage }) => {
+  if (isBuiltinSpecifier(specifier)) return 'node-builtin';
+  if (NON_MODULE_ASSET_PATTERN.test(specifier)) return 'non-module-asset';
+  if (isRelativeSpecifier(specifier)) return null;
+  if (matchesTsconfigPath(specifier)) return null;
+  // Installed packages can fail resolution for reasons of their own (export conditions such as
+  // `server-only`), and none of them can import this project's css modules.
+  if (isPackageSpecifier(specifier) && isInstalledPackage(specifier, containingFile)) return 'external-package';
+  return null;
 };
 
 const scriptKindFor = (ts, fileName) => {
@@ -205,6 +291,9 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
   const filePoison = new Map(); // cssFile → reason applying to every export
   const unresolvedImports = []; // { file, specifier } the analyzer could not resolve but that may hide a css module
   const unscannedImports = []; // resolved project files the analyzer did not scan (excluded / outside root)
+  const ignoredImports = []; // { file, specifier, reason } dropped on purpose — cannot hide a css module
+  const matchesTsconfigPath = createTsconfigPathMatcher(compilerOptions);
+  const isInstalledPackage = createInstalledPackageChecker(resolvedRoot);
 
   // Silence must never read as proof: a verdict for a name the module does not export means the
   // graph model is wrong somewhere, so everything reachable from that module gets poisoned.
@@ -237,9 +326,12 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
     const { target, external } = resolveSpecifier(specifier, containingFile);
     if (external) return null;
     if (!target) {
-      // Any non-external miss may be an alias hiding a css module (or a barrel that leads to one),
-      // so it is recorded unconditionally and the rule refuses the artifact.
-      unresolvedImports.push({ file: relative(containingFile), specifier });
+      // A miss is only harmless when the specifier provably cannot reach a css module; anything else
+      // may be an alias hiding one (or a barrel leading to one), so it is recorded and the rule
+      // refuses the artifact.
+      const ignoredReason = ignoredImportReason(specifier, containingFile, { matchesTsconfigPath, isInstalledPackage });
+      if (ignoredReason) ignoredImports.push({ file: relative(containingFile), specifier, reason: ignoredReason });
+      else unresolvedImports.push({ file: relative(containingFile), specifier });
       return null;
     }
     if (!sources.has(target)) {
@@ -482,6 +574,7 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
     unproven,
     unresolvedImports,
     unscannedImports,
+    ignoredImports,
     excluded,
     skippedDirectories,
     tsconfigLoaded,

@@ -48,7 +48,10 @@ const main = () => {
 
   const provenCount = Object.values(artifact.provenSoloClasses).reduce((sum, names) => sum + names.length, 0);
   const unprovenCount = Object.values(artifact.unproven).reduce((sum, byName) => sum + Object.keys(byName).length, 0);
-  console.log(`sprinkles-lint-analyze: ${provenCount} proven-solo, ${unprovenCount} unproven → ${path.relative(options.root, outPath) || outPath}`);
+  console.log(
+    `sprinkles-lint-analyze: ${provenCount} proven-solo, ${unprovenCount} unproven, ` +
+      `${artifact.ignoredImports.length} imports ignored (builtins/assets/packages) → ${path.relative(options.root, outPath) || outPath}`,
+  );
 
   if (artifact.unresolvedImports.length > 0 || artifact.unscannedImports.length > 0) {
     console.warn(

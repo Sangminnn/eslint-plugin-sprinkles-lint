@@ -1,3 +1,3 @@
-import * as ghost from '@missing/ghost.css';
+import { ghostCard } from '@fixture/nonexistent/module';
 
-export const GhostPage = () => <div className={ghost.a}>x</div>;
+export const GhostPage = () => <div className={ghostCard}>x</div>;

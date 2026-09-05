@@ -15,7 +15,8 @@
     "README.md",
     "LICENSE",
     "eslint.config.js",
-    "CHANGELOG.md"
+    "CHANGELOG.md",
+    "!src/tests/analyzer-fixtures"
   ],
   "scripts": {
     "lint": "eslint .",

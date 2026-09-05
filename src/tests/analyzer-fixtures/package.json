@@ -1,0 +1,10 @@
+{
+  "name": "analyzer-fixtures",
+  "private": true,
+  "dependencies": {
+    "@vanilla-extract/css": "^1.16.0",
+    "clsx": "^2.1.1",
+    "react-loading-skeleton": "^3.4.0",
+    "server-only": "^0.0.1"
+  }
+}

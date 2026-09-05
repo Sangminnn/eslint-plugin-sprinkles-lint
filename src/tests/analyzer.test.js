@@ -14,6 +14,8 @@ const STYLES = 'src/styles.css.ts';
 const DYNAMIC = 'src/dynamic.css.ts';
 const proven = (file) => artifact.provenSoloClasses[file] || [];
 const unproven = (file) => artifact.unproven[file] || {};
+const unresolvedSpecifiers = new Set(artifact.unresolvedImports.map((entry) => entry.specifier));
+const ignoredReasonFor = (specifier) => artifact.ignoredImports.find((entry) => entry.specifier === specifier)?.reason;
 
 const cases = [];
 const test = (name, run) => cases.push({ name, run });
@@ -90,8 +92,43 @@ test('C4. import + local `export { x }` barrel → unproven', () => {
   assert.strictEqual(unproven(STYLES).localHole, 'reexported-locally');
 });
 
-test('C5. unresolvable specifier that may hide a css module is reported in the artifact', () => {
-  assert.ok(artifact.unresolvedImports.some((entry) => entry.specifier === '@missing/ghost.css'));
+test('U-I5 (was C5). a declared tsconfig-paths alias that fails to resolve is still a graph hole', () => {
+  assert.ok(
+    artifact.unresolvedImports.some((entry) => entry.specifier === '@fixture/nonexistent/module'),
+    'alias miss must be recorded so the rule refuses the artifact',
+  );
+});
+
+test('U-I1. node builtins, `node:` prefixed and builtin subpaths are ignored', () => {
+  for (const specifier of ['fs', 'node:path', 'fs/promises']) {
+    assert.ok(!unresolvedSpecifiers.has(specifier), `${specifier} must not be recorded`);
+    assert.strictEqual(ignoredReasonFor(specifier), 'node-builtin');
+  }
+});
+
+test('U-I2. non-module asset imports are ignored, relative or aliased or through a package', () => {
+  for (const specifier of ['./global.css', '@fixture/styles/reset.css', 'react-loading-skeleton/dist/skeleton.css', '../assets/logo.svg']) {
+    assert.ok(!unresolvedSpecifiers.has(specifier), `${specifier} must not be recorded`);
+    assert.strictEqual(ignoredReasonFor(specifier), 'non-module-asset');
+  }
+});
+
+test('U-I3. a declared package whose resolution fails (export conditions) is ignored', () => {
+  assert.ok(!unresolvedSpecifiers.has('server-only'));
+  assert.strictEqual(ignoredReasonFor('server-only'), 'external-package');
+  assert.strictEqual(ignoredReasonFor('clsx'), 'external-package');
+});
+
+test('U-I6. a package-shaped specifier that is not installed is a build-tool alias → recorded', () => {
+  assert.ok(unresolvedSpecifiers.has('@components/reexporter'), 'undeclared scoped alias must be recorded');
+  assert.ok(unresolvedSpecifiers.has('components/Foo'), 'baseUrl-style absolute import must be recorded');
+  assert.strictEqual(ignoredReasonFor('@components/reexporter'), undefined);
+});
+
+test('U-I4. a `.css` specifier that resolves to a `.css.ts` stays a graph edge', () => {
+  assert.ok(!unresolvedSpecifiers.has('@fixture/styles.css'));
+  assert.strictEqual(ignoredReasonFor('@fixture/styles.css'), undefined, 'it resolved, so it is neither ignored nor unresolved');
+  assert.strictEqual(unproven(STYLES).aliasOnlyComposed, 'composed-with-component:Button', 'the edge really carried a verdict');
 });
 
 test('M2. .jsx and .js consumers are scanned', () => {
@@ -126,8 +163,11 @@ test('F3. `export * as ns` poisons the re-exported css module', () => {
   assert.ok(unproven('src/starns.css.ts').starNsCard);
 });
 
-test('F4. bare unresolved specifiers are recorded unconditionally', () => {
-  assert.ok(artifact.unresolvedImports.some((entry) => entry.specifier === 'clsx'), 'uninstalled bare package must be recorded');
+test('F4. a build-tool-only alias (not an npm package name, not in tsconfig paths) is recorded', () => {
+  assert.ok(
+    artifact.unresolvedImports.some((entry) => entry.specifier === '@/components/hidden'),
+    '`@/…` cannot be a package name, so a miss there may hide project code',
+  );
   assert.strictEqual(artifact.tsconfigLoaded, true);
 });
 
