@@ -1,5 +1,19 @@
 # Changelog
 
+## 2.18.1
+
+### Fixed
+
+- The analyzer recorded every unresolvable specifier as a graph hole, so ordinary imports — node builtins (`fs`, `node:path`, `fs/promises`), stylesheet and image assets, and declared packages whose resolution fails on export conditions (`server-only`) — made the rule refuse the artifact, which in practice happened in every real project. Those three kinds are now dropped; everything else still counts: a failed relative path (unless it ends in an asset extension), a specifier matching a declared tsconfig `paths` pattern, a name that cannot be an npm package (`@/foo`, `~/foo`, `#foo`), and a package-shaped specifier that is not installed — which is how an undeclared `@components/*` alias or a `baseUrl`-relative `components/Foo` import stays a hole. A `.css` specifier resolving to a `.css.ts` remains a graph edge.
+
+### Added
+
+- `ignoredImports` in the artifact records what was dropped and why (`node-builtin`, `non-module-asset`, `external-package`). The rule does not use it for verification.
+
+### Changed
+
+- Analyzer test fixtures are no longer published; they carried a nested `package.json`, which declared a package boundary inside the installed plugin.
+
 ## 2.18.0
 
 ### Added
