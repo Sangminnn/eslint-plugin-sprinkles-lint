@@ -27,6 +27,9 @@ const ruleTester = new RuleTester({
 const plugin = require('../index');
 const rule = plugin.rules['no-use-style-declared-sprinkles'];
 
+// A suite that cannot fail is not a suite: assertion failures below make the process exit non-zero.
+let failureCount = 0;
+
 console.log('🧪 ESLint Sprinkles 플러그인 포괄적 테스트 시작\n');
 
 // 1. 플러그인 구조 검증
@@ -72,26 +75,34 @@ const validTestCases = [
   },
 ];
 
+// A fix that writes `sprinkles(...)` is only offered when the file imports it, so these inputs carry
+// the import the way a real css.ts does.
+const SPRINKLES_IMPORT = `import { sprinkles } from '@/styles/sprinkles.css';`;
+
 const invalidTestCases = [
   // 잘못된 케이스들 (auto-fix 포함)
   {
-    code: `style({ color: 'gray-900', fontWeight: 700 })`,
+    code: `${SPRINKLES_IMPORT}
+style({ color: 'gray-900', fontWeight: 700 })`,
     options: [{ configPath: './src/sprinkles.js' }],
     errors: [{ messageId: 'useSprinkles' }],
-    output: `sprinkles({
+    output: `${SPRINKLES_IMPORT}
+sprinkles({
     color: 'gray-900',
     fontWeight: 700
   })`,
   },
   {
-    code: `style({
+    code: `${SPRINKLES_IMPORT}
+style({
       color: 'gray-900',
       fontWeight: 700,
       transform: 'scale(1.1)'
     })`,
     options: [{ configPath: './src/sprinkles.js' }],
     errors: [{ messageId: 'useSprinkles' }],
-    output: `style([
+    output: `${SPRINKLES_IMPORT}
+style([
   sprinkles({
     color: 'gray-900',
     fontWeight: 700
@@ -124,6 +135,7 @@ try {
   if (error.actual) {
     console.error('   실제 결과:', error.actual);
   }
+  failureCount += 1;
 }
 
 // 4. 실제 ESLint 통합 테스트
@@ -259,7 +271,11 @@ async function runTestFiles() {
 async function runAllTests() {
   await runIntegrationTests();
   await runTestFiles();
-  console.log('\n🎉 모든 테스트 완료!');
+  console.log(`\n${failureCount === 0 ? '🎉 모든 테스트 완료!' : `❌ ${failureCount}건 실패`}`);
+  process.exit(failureCount > 0 ? 1 : 0);
 }
 
-runAllTests().catch(console.error);
+runAllTests().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});
