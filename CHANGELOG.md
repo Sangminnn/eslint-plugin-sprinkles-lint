@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.19.0
+
+`"sprinkles-lint/no-use-style-declared-sprinkles": "error"` is now a complete configuration.
+
+### Added
+
+- `usageAnalysis` option with three modes. The new default, `auto`, runs the usage analysis in-process the first time a file needs a verdict and caches the verdicts (not the ASTs) for the rest of the process; a file-list sweep detects added, removed or modified files and triggers a rescan. `artifact` keeps the 2.18 flow of a precomputed file via `provenSoloClassesPath` — the right choice when each file is linted in its own process, or to share the result across CI jobs. `off` disables proofs entirely.
+- `projectRoot` option, narrowing the scanned tree. The default is the working directory: a proof asserts that no consumer composes the class, so the walk covers everything ESLint was pointed at, and a nested `tsconfig.json` is used to resolve aliases without shrinking it. Narrowing is available but has to be asked for.
+- `sprinklesImportSource` is derived from `tsconfig` `paths` when they map unambiguously onto the discovered sprinkles module, so the import a fix has to add no longer needs to be configured. An explicit option still wins, and an ambiguous mapping withholds the fix rather than guessing.
+
+### Notes
+
+- Both analysis modes call the same `analyzeProject`, and a test asserts their output is identical.
+- Anything unproven or unresolvable falls back to a suggestion in every mode. Freshness is bounded rather than instantaneous: verdicts are re-derived when a scanned file, the file list, or the tsconfig chain changes, but a cached verdict is reused for up to half a second between checks, so a write from outside the lint run can be one check behind.
+- Projects that used no options now get usage-aware autofixes where 2.18 only suggested. Set `usageAnalysis: 'off'` to keep the old behavior.
+
 ## 2.18.1
 
 ### Fixed

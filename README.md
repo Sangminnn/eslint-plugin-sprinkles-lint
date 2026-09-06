@@ -227,9 +227,15 @@ module.exports = {
 
 | Option | Type | Description |
 |---|---|---|
-| `configPath` | `string` | Path to the exported sprinkles config (see STEP 1–3). |
-| `sprinklesImportSource` | `string` | Module specifier used when `--fix` has to add `import { sprinkles } from '...'` to a file that does not import it yet (e.g. `'@/styles/sprinkles.css'`). Without it, files that do not import `sprinkles` are reported but **not** auto-fixed. |
-| `provenSoloClassesPath` | `string` | Path to the artifact produced by `sprinkles-lint-analyze`. Classes proven to be used only standalone are hoisted by `--fix` without any allowlist (see [Usage-aware hoisting](#usage-aware-hoisting-sprinkles-lint-analyze)). |
+Every option is optional — `"error"` on its own is a complete configuration.
+
+| Option | Type | Description |
+|---|---|---|
+| `usageAnalysis` | `'auto' \| 'artifact' \| 'off'` | How the rule learns which classes are used standalone. `auto` (default) analyses the project in-process; `artifact` reads a file written by `sprinkles-lint-analyze`; `off` skips proofs and only suggests. See [Usage-aware hoisting](#usage-aware-hoisting). |
+| `projectRoot` | `string` | Narrows the scanned tree to this directory. Defaults to the working directory, which is what keeps a proof honest — see [the note on narrowing](#usage-aware-hoisting). |
+| `configPath` | `string` | Path to the exported sprinkles config (see STEP 1–3). Omit it to let the plugin discover `sprinkles.css.ts` itself. |
+| `sprinklesImportSource` | `string` | Module specifier used when `--fix` has to add `import { sprinkles } from '...'`. Derived from your `tsconfig` `paths` when it maps unambiguously onto the discovered sprinkles module; set it explicitly when it does not. |
+| `provenSoloClassesPath` | `string` | Artifact produced by `sprinkles-lint-analyze`; implies `usageAnalysis: 'artifact'`. |
 | `hoistableOverrideProperties` | `string[]` | Properties the project knows are never set by any composed component base. When every movable property of an override object is in this list, `--fix` hoists it into `sprinkles()`; otherwise the case is only reported with an IDE suggestion (see [Autofix safety §2](#2-override-objects-composed-with-other-classes-no-autofix-by-default)). Default `[]`. |
 
 ```js
@@ -272,7 +278,7 @@ export const removeButton = style([
 
 Three ways to move the property without retyping it, in the order the rule consults them:
 
-- **Usage-aware proof (recommended)** — run `sprinkles-lint-analyze` and point `provenSoloClassesPath` at its output. A class proven to be used only standalone has no competing class on the same element, so `--fix` hoists it. See [Usage-aware hoisting](#usage-aware-hoisting-sprinkles-lint-analyze).
+- **Usage-aware proof (default)** — the rule analyses the project and hoists a class it can prove is only ever used standalone, because then no competing class shares the element. Nothing to configure. See [Usage-aware hoisting](#usage-aware-hoisting).
 
 - **IDE suggestion** — the report carries a `hoistToSprinkles` quick-fix (when the file imports `sprinkles` or `sprinklesImportSource` is set — the same precondition as `--fix`). `--fix` never applies suggestions; you check the call sites, then apply it per case from your editor.
 - **`hoistableOverrideProperties`** — if the project knows a property is never declared by any component base (`minHeight`, `objectFit`, `cursor`, …), list it in the option and `--fix` hoists it automatically. Only override objects whose *every* movable property is listed are fixed; the rest stay suggestions. The default is an empty list, so nothing moves unless the project says so.
@@ -285,24 +291,40 @@ Neither path is offered for shapes the transformation cannot handle losslessly �
 
 `style({ width: 'auto' })` → `sprinkles({ width: 'auto' })` is still auto-fixed. Whether that class is later composed with another component's base class cannot be known from the file, so check call sites that pass it as `className` to a component with its own `width`.
 
-### Usage-aware hoisting (`sprinkles-lint-analyze`)
+### Usage-aware hoisting
 
-The composition hazard lives outside the linted file, so the rule alone cannot tell a dangerous override from a simple non-separation. vanilla-extract closes that gap: class names are build-time hashes, so **every consumer must import the class** — walking the import graph yields the complete consumer list, and "no usage found" genuinely means unused. The analyzer uses this to *prove* solo usage instead of trying to *detect* composition (a detection miss would hoist and regress; a proof miss only leaves a suggestion).
+The composition hazard lives outside the linted file, so the rule alone cannot tell a dangerous override from a simple non-separation. vanilla-extract closes that gap: class names are build-time hashes, so **every consumer must import the class** — walking the import graph yields the complete consumer list, and "no usage found" genuinely means unused. The rule uses this to *prove* solo usage instead of trying to *detect* composition (a detection miss would hoist and regress; a proof miss only leaves a suggestion).
+
+```js
+// this is the whole configuration
+"sprinkles-lint/no-use-style-declared-sprinkles": "error"
+```
+
+In the default `auto` mode the rule runs that analysis itself, the first time a file actually needs a verdict, and keeps the verdicts in memory for the rest of the process. A verdict is only ever requested from inside the override guard, so a lint of files that never reach it costs nothing. On ~2,000 files the scan takes well under a second; afterwards a check re-walks the file list and compares mtimes (~10ms) and rescans only when something moved. Requires `typescript` >= 4.8 in the project.
+
+**What gets scanned, and why it is the whole working directory.** A proof states that *no* consumer composes the class, which is only true if every consumer was looked at. The scanned tree is therefore the directory ESLint runs in — never the package the file happens to live in — even when a nested `tsconfig.json` exists (that nested config is still used to resolve `@/…`, it just does not shrink the walk). Consumers whose imports the graph cannot follow, such as another package's alias, show up as unresolved and disable proofs for the whole run rather than being quietly excluded.
+
+`projectRoot` narrows that tree. It is a statement by you that nothing outside it composes these classes, so use it only when that holds — for a monorepo package linted on its own, for instance.
+
+**Freshness.** A change to any scanned file, an added or deleted file, or an edit to the tsconfig chain triggers a rescan. Between checks there is a short window (half a second) in which cached verdicts are reused without re-reading the file list; a write landing inside that window from outside the lint run — a `git pull`, a code generator — is picked up on the next check rather than immediately.
+
+#### `artifact` mode — precomputed verdicts
+
+When every file is linted in its own short-lived process (`lint-staged` one file at a time) the scan cannot be amortised, and in CI you may prefer to compute it once and cache the result. Run the analyzer up front and point the rule at its output:
 
 ```bash
-# before lint (e.g. as a CI step); requires `typescript` >= 4.8 in the project
 npx sprinkles-lint-analyze --root . --tsconfig tsconfig.json --out .sprinkles-lint/proven-solo-classes.json
 ```
 
-The analyzer scans every `.ts/.tsx/.js/.jsx/.mjs/.cjs` file under `--root` — a full directory walk in addition to the tsconfig file set, dot-directories like `.storybook` included, so consumers outside `include` are still seen. A fixed list of build directories (`node_modules`, `dist`, `build`, `coverage`, `storybook-static`, `.git`, `.next`, `.turbo`, `.yarn`) is skipped and recorded in the artifact. A tsconfig is required (aliases are unresolvable without one; the rule refuses an artifact generated without it). `--exclude glob,glob` removes files from the scan — **an excluded file's compositions become invisible and can turn into false proofs**, so exclude only files that never render classes; excluded paths are recorded in the artifact.
-
 ```js
 "sprinkles-lint/no-use-style-declared-sprinkles": ["error", {
-  "configPath": "./sprinkles.config.js",
-  "sprinklesImportSource": "@/styles/sprinkles.css",
   "provenSoloClassesPath": ".sprinkles-lint/proven-solo-classes.json"
 }]
 ```
+
+Both modes call the same analysis and reach the same verdicts; only the timing differs. `usageAnalysis: 'off'` disables proofs entirely and leaves every guarded case as a suggestion.
+
+The analyzer scans every `.ts/.tsx/.js/.jsx/.mjs/.cjs` file under `--root` — a full directory walk in addition to the tsconfig file set, dot-directories like `.storybook` included, so consumers outside `include` are still seen. A fixed list of build directories (`node_modules`, `dist`, `build`, `coverage`, `storybook-static`, `.git`, `.next`, `.turbo`, `.yarn`) is skipped and recorded in the artifact. A tsconfig is required (aliases are unresolvable without one; the rule refuses an artifact generated without it). `--exclude glob,glob` removes files from the scan — **an excluded file's compositions become invisible and can turn into false proofs**, so exclude only files that never render classes; excluded paths are recorded in the artifact.
 
 A class is **proven** only when every reference the analyzer sees is `className={styles.x}` alone on an intrinsic tag (lowercase, no dot — `<div>`, `<span>`, …), or when it has no reference at all. The invariant behind that claim: every reference to a css binding either records a verdict or poisons its module — passed to a component, composed via `clsx`/conditional/array/template, aliased to a variable or via `export { x as y }`, `styleVariants` member access, sent through a non-`className` prop or a spread, referenced inside its own css.ts, re-exported locally or as `export * as ns`, reached by `require()`/dynamic `import()`/default or namespace-of-barrel import, or by dynamic access (`styles[key]` marks the whole file) — all unproven with the reason recorded. A verdict that cannot be attributed to a known export poisons everything reachable from that module.
 
