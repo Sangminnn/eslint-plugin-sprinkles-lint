@@ -100,8 +100,63 @@ const SPRINKLES_MODULE = `export const sprinklesProperties = {
 } as const;
 `;
 
+// No `import { sprinkles }` on purpose: the fix has to add it, which is what the derivation feeds.
+const CSS_MODULE_WITHOUT_IMPORT = `import { style } from '@vanilla-extract/css';
+
+export const container = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);
+`;
+
+const writeZeroConfigProject = (tsconfigPaths = { '@/*': ['src/*'] }) =>
+  writeProject({
+    'tsconfig.json': JSON.stringify({
+      compilerOptions: { target: 'esnext', module: 'esnext', moduleResolution: 'bundler', jsx: 'preserve', baseUrl: '.', paths: tsconfigPaths },
+      include: ['src/**/*'],
+    }),
+    'src/styles/sprinkles.css.ts': SPRINKLES_MODULE,
+    'src/styles.css.ts': CSS_MODULE_WITHOUT_IMPORT,
+  });
+
 const cases = [];
 const test = (name, run) => cases.push({ name, run });
+
+test('V-9. zero config: the sprinkles import specifier is derived from tsconfig paths', async () => {
+  clearUsageCache();
+  const root = writeZeroConfigProject();
+  const result = await lintProject(root, null);
+
+  assert.notStrictEqual(result.output, undefined, 'no options at all must still fix');
+  assert.ok(
+    result.output.startsWith(`import { sprinkles } from '@/styles/sprinkles.css';`),
+    `derived import missing:\n${result.output}`,
+  );
+  assert.ok(result.output.includes(`minHeight: '100vh'`));
+});
+
+test('V-10. two aliases map onto the same module → ambiguous, so the fix is withheld', async () => {
+  clearUsageCache();
+  const root = writeZeroConfigProject({ '@/*': ['src/*'], '~/*': ['src/*'] });
+  const result = await lintProject(root, null);
+
+  assert.strictEqual(result.output, undefined, 'an ambiguous specifier must never be guessed');
+  assert.ok(result.messages.some((message) => message.messageId === 'useSprinkles' || message.messageId === 'manualSeparationRequired'));
+});
+
+test('V-10b. no tsconfig paths at all → nothing to reverse-map, fix withheld', async () => {
+  clearUsageCache();
+  const root = writeZeroConfigProject({});
+  const result = await lintProject(root, null);
+
+  assert.strictEqual(result.output, undefined);
+});
+
+test('V-11. an explicit sprinklesImportSource wins over the derived one', async () => {
+  clearUsageCache();
+  const root = writeZeroConfigProject();
+  const result = await lintProject(root, { configPath: undefined, sprinklesImportSource: '~/custom/sprinkles.css' });
+
+  assert.notStrictEqual(result.output, undefined);
+  assert.ok(result.output.startsWith(`import { sprinkles } from '~/custom/sprinkles.css';`), `option ignored:\n${result.output}`);
+});
 
 test('V-1. no options at all → a proven-solo class is hoisted by --fix', async () => {
   clearUsageCache();

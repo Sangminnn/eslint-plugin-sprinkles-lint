@@ -17,7 +17,8 @@ const {
 } = require('./utils');
 const { getSprinklesConfig } = require('./sprinkles-discovery');
 const { sha256 } = require('../analyzer/analyze');
-const { getProvenSoloClassesFor } = require('../analyzer/usage-cache');
+const { getProvenSoloClassesFor, resolveUsageProject } = require('../analyzer/usage-cache');
+const { deriveSprinklesImportSource } = require('../analyzer/import-source');
 
 // provenSoloClassesPath artifact (built by sprinkles-lint-analyze), cached and verified once per
 // path+mtime. An artifact is refused outright — with a single warning — when the analyzer reported
@@ -179,7 +180,7 @@ module.exports = {
     // Discovery looks where it always has — the working directory — so an upgrade never moves the
     // sprinkles module out from under a project that relied on auto-discovery.
     const discoveryRoot = options.projectRoot ? path.resolve(cwd, options.projectRoot) : cwd;
-    const config = getSprinklesConfig({ ...options, projectRoot: discoveryRoot });
+    const config = getSprinklesConfig({ ...options, projectRoot: discoveryRoot, cwd });
 
     if (!config) {
       // If no config found, skip processing
@@ -263,6 +264,26 @@ module.exports = {
     const isDirective = (statement) => statement.type === 'ExpressionStatement' && typeof statement.directive === 'string';
     const firstNonDirectiveStatement = programBody.find((statement) => !isDirective(statement));
 
+    // The project already says where `sprinkles` lives: reversing the tsconfig `paths` mapping onto the
+    // discovered module gives the same specifier the rest of the codebase writes, so the option is only
+    // needed when that mapping is ambiguous or absent.
+    let sprinklesImportSourceCache;
+    const getSprinklesImportSource = () => {
+      if (options.sprinklesImportSource) {
+        return options.sprinklesImportSource;
+      }
+      if (sprinklesImportSourceCache === undefined) {
+        sprinklesImportSourceCache = containingFile
+          ? deriveSprinklesImportSource({
+              sprinklesFilePath: config.sprinklesFilePath,
+              tsconfigPath: resolveUsageProject({ containingFile, cwd, projectRoot: options.projectRoot }).tsconfigPath,
+              containingFile,
+            })
+          : null;
+      }
+      return sprinklesImportSourceCache;
+    };
+
     // Inserting `sprinkles(...)` into a file that never imports it produces code that does not compile.
     // Fixes that emit a sprinkles call are offered as-is when the import is present, extended with an
     // import insertion when `sprinklesImportSource` is configured, and withheld otherwise.
@@ -271,12 +292,13 @@ module.exports = {
         return buildFix;
       }
 
-      if (!options.sprinklesImportSource || !firstNonDirectiveStatement) {
+      const importSource = getSprinklesImportSource();
+      if (!importSource || !firstNonDirectiveStatement) {
         return undefined;
       }
 
       return (fixer) => {
-        const importStatement = `import { sprinkles } from '${options.sprinklesImportSource}';\n`;
+        const importStatement = `import { sprinkles } from '${importSource}';\n`;
         const insertImport = fixer.insertTextBefore(firstNonDirectiveStatement, importStatement);
 
         return [].concat(buildFix(fixer), insertImport);

@@ -1177,7 +1177,7 @@ const getSprinklesConfig = (options = {}) => {
   // If configPath is provided, use the existing approach
   if (options.configPath) {
     try {
-      const configPath = path.resolve(process.cwd(), options.configPath);
+      const configPath = path.resolve(options.cwd || process.cwd(), options.configPath);
       return require(configPath);
     } catch (error) {
       console.error('Error loading config from path:', error.message);
@@ -1187,13 +1187,16 @@ const getSprinklesConfig = (options = {}) => {
 
   // Auto-discovery mode
   // console.log('[getSprinklesConfig] Using auto-discovery mode');
-  const sprinklesFilePath = findSprinklesFile();
+  const sprinklesFilePath = findSprinklesFile(options.projectRoot || process.cwd());
   if (!sprinklesFilePath) {
     // console.warn('Could not find sprinkles.css.ts file in the project');
     return null;
   }
 
-  return parseSprinklesFile(sprinklesFilePath);
+  const parsed = parseSprinklesFile(sprinklesFilePath);
+  // The path is kept so the rule can derive the import specifier for `sprinkles` when a fix has to
+  // add the import; only auto-discovery knows the real module, a configPath points at a shim.
+  return parsed ? { ...parsed, sprinklesFilePath } : parsed;
 };
 
 module.exports = {
