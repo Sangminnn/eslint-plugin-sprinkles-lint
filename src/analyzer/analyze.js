@@ -146,6 +146,109 @@ const scriptKindFor = (ts, fileName) => {
   return ts.ScriptKind.JSX;
 };
 
+/** Source files under a root, with the build directories the analyzer never reads. */
+const walkSourceFiles = (rootDir) => {
+  const files = [];
+  const skippedDirectories = [];
+  const walk = (dir) => {
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (DEFAULT_EXCLUDED_DIRECTORIES.has(entry.name)) skippedDirectories.push(toPosix(path.relative(rootDir, fullPath)));
+        else walk(fullPath);
+        continue;
+      }
+      if (SOURCE_EXTENSION_PATTERN.test(entry.name)) files.push(fullPath);
+    }
+  };
+  walk(rootDir);
+  return { files, skippedDirectories };
+};
+
+/** Every config file that contributes to one tsconfig, so an alias change in a shared base is seen. */
+const collectTsconfigChain = (tsconfigPath, seen = new Set()) => {
+  const resolved = path.resolve(tsconfigPath);
+  if (seen.has(resolved) || !fs.existsSync(resolved)) return [...seen];
+  seen.add(resolved);
+
+  try {
+    const ts = require('typescript');
+    const configFile = ts.readConfigFile(resolved, ts.sys.readFile);
+    const extendsField = configFile.config && configFile.config.extends;
+    const parents = Array.isArray(extendsField) ? extendsField : extendsField ? [extendsField] : [];
+    for (const parent of parents) {
+      const parentPath = parent.startsWith('.')
+        ? path.resolve(path.dirname(resolved), parent)
+        : path.resolve(path.dirname(resolved), 'node_modules', parent);
+      const withExtension = /\.json$/.test(parentPath) ? parentPath : `${parentPath}.json`;
+      collectTsconfigChain(withExtension, seen);
+    }
+  } catch (error) {
+    // A config we cannot read simply contributes no extra mtime to watch.
+  }
+
+  return [...seen];
+};
+
+const mtimeOf = (filePath) => {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch (error) {
+    return null;
+  }
+};
+
+/**
+ * The cheap half of a scan: which files exist and when they last changed. Used to decide whether a
+ * cached set of verdicts is still describing the project — a full scan reads and parses every file,
+ * this only walks and stats (single-digit milliseconds on a few thousand files).
+ */
+const collectSignature = ({ rootDir, tsconfigPath, exclude = [] }) => {
+  const resolvedRoot = path.resolve(rootDir);
+  const resolvedTsconfig = path.resolve(resolvedRoot, tsconfigPath || 'tsconfig.json');
+  const excludeRegexps = exclude.map(globToRegExp);
+  const files = {};
+
+  for (const fileName of walkSourceFiles(resolvedRoot).files) {
+    const relativePath = toPosix(path.relative(resolvedRoot, fileName));
+    if (excludeRegexps.some((pattern) => pattern.test(relativePath))) continue;
+    files[relativePath] = mtimeOf(fileName);
+  }
+
+  const tsconfigFiles = {};
+  for (const configPath of collectTsconfigChain(resolvedTsconfig)) tsconfigFiles[configPath] = mtimeOf(configPath);
+
+  return { root: resolvedRoot, tsconfigFiles, files };
+};
+
+/** True when the project no longer matches the signature a cached scan was built from. */
+const isSignatureStale = (signature, { rootDir, tsconfigPath, exclude = [] }) => {
+  if (!signature) return true;
+
+  const current = collectSignature({ rootDir, tsconfigPath, exclude });
+
+  const cachedConfigs = signature.tsconfigFiles || {};
+  const currentConfigs = current.tsconfigFiles || {};
+  if (Object.keys(cachedConfigs).length !== Object.keys(currentConfigs).length) return true;
+  for (const [configPath, mtimeMs] of Object.entries(currentConfigs)) {
+    if (cachedConfigs[configPath] !== mtimeMs) return true;
+  }
+
+  for (const [relativePath, mtimeMs] of Object.entries(current.files)) {
+    if (signature.files[relativePath] !== mtimeMs) return true; // added or modified
+  }
+  for (const [relativePath, mtimeMs] of Object.entries(signature.files)) {
+    // The walk skips build directories and stops at the root, but tsconfig `include` can reach both
+    // (`.next/types/**` is in every Next.js config). Absence from the walk is therefore not proof of
+    // removal — those entries are checked against disk directly.
+    if (current.files[relativePath] === undefined) {
+      if (mtimeOf(path.resolve(current.root, relativePath)) !== mtimeMs) return true;
+    }
+  }
+
+  return false;
+};
+
 const collectSourceFiles = (ts, rootDir, tsconfigPath, tsconfigWasExplicit, excludePatterns) => {
   const excludeRegexps = excludePatterns.map(globToRegExp);
   const isExcluded = (relativePath) => excludeRegexps.some((pattern) => pattern.test(relativePath));
@@ -168,19 +271,8 @@ const collectSourceFiles = (ts, rootDir, tsconfigPath, tsconfigWasExplicit, excl
   // The tsconfig file set alone is not enough: a consumer outside `include` would silently
   // vanish and its compositions would look like proof. Always walk the whole root as well —
   // including dot-directories such as .storybook, whose decorators are real renderers.
-  const skippedDirectories = [];
-  const walk = (dir) => {
-    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        if (DEFAULT_EXCLUDED_DIRECTORIES.has(entry.name)) skippedDirectories.push(toPosix(path.relative(rootDir, fullPath)));
-        else walk(fullPath);
-        continue;
-      }
-      if (SOURCE_EXTENSION_PATTERN.test(entry.name)) fileNames.add(fullPath);
-    }
-  };
-  walk(rootDir);
+  const { files: walkedFiles, skippedDirectories } = walkSourceFiles(rootDir);
+  for (const fileName of walkedFiles) fileNames.add(fileName);
 
   const excluded = [];
   const files = [];
@@ -258,7 +350,12 @@ const classifyValueUsage = (ts, valueNode) => {
   return UNPROVEN(`unrecognized-usage:${ts.SyntaxKind[parent.kind]}`);
 };
 
-const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } = {}) => {
+// Counts full scans so tests can prove the rule's cache is actually being hit.
+let scanCount = 0;
+const getScanCount = () => scanCount;
+
+const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [], collectFileHashes = true } = {}) => {
+  scanCount += 1;
   const ts = loadTypescript();
   const resolvedRoot = path.resolve(rootDir);
   const tsconfigWasExplicit = Boolean(tsconfigPath);
@@ -274,8 +371,10 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
   const relative = (fileName) => toPosix(path.relative(resolvedRoot, fileName));
 
   const sources = new Map(); // absolute path → { text, sourceFile }
+  const signatureFiles = {};
   for (const fileName of files) {
     const text = fs.readFileSync(fileName, 'utf8');
+    signatureFiles[relative(fileName)] = mtimeOf(fileName);
     sources.set(fileName, {
       text,
       sourceFile: ts.createSourceFile(fileName, text, ts.ScriptTarget.Latest, true, scriptKindFor(ts, fileName)),
@@ -555,14 +654,23 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
     if (provenSoloClasses[relativePath]) provenSoloClasses[relativePath].sort();
   }
 
+  // Content hashes exist so a written artifact can be checked against disk later. The in-process
+  // auto mode compares mtimes instead, and hashing every file would be the scan's largest cost.
   const inputs = {};
-  for (const [fileName, { text }] of sources) inputs[relative(fileName)] = sha256(text);
-  const sourceHash = sha256(
-    Object.keys(inputs)
-      .sort()
-      .map((relativePath) => `${relativePath}:${inputs[relativePath]}`)
-      .join('\n'),
-  );
+  if (collectFileHashes) {
+    for (const [fileName, { text }] of sources) inputs[relative(fileName)] = sha256(text);
+  }
+  const sourceHash = collectFileHashes
+    ? sha256(
+        Object.keys(inputs)
+          .sort()
+          .map((relativePath) => `${relativePath}:${inputs[relativePath]}`)
+          .join('\n'),
+      )
+    : null;
+  const tsconfigFiles = {};
+  for (const configPath of collectTsconfigChain(resolvedTsconfig)) tsconfigFiles[configPath] = mtimeOf(configPath);
+  const signature = { root: resolvedRoot, tsconfigFiles, files: signatureFiles };
 
   return {
     version: 1,
@@ -570,6 +678,7 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
     root: resolvedRoot,
     sourceHash,
     inputs,
+    signature,
     provenSoloClasses,
     unproven,
     unresolvedImports,
@@ -581,4 +690,4 @@ const analyzeProject = ({ rootDir = process.cwd(), tsconfigPath, exclude = [] } 
   };
 };
 
-module.exports = { analyzeProject, sha256 };
+module.exports = { analyzeProject, collectSignature, isSignatureStale, getScanCount, sha256 };

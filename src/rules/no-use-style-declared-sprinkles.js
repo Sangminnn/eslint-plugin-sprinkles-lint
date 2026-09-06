@@ -17,12 +17,14 @@ const {
 } = require('./utils');
 const { getSprinklesConfig } = require('./sprinkles-discovery');
 const { sha256 } = require('../analyzer/analyze');
+const { getProvenSoloClassesFor } = require('../analyzer/usage-cache');
 
 // provenSoloClassesPath artifact (built by sprinkles-lint-analyze), cached and verified once per
 // path+mtime. An artifact is refused outright — with a single warning — when the analyzer reported
 // unresolved or unscanned imports, or when any input file on disk no longer matches its recorded
 // hash (the proof is a statement about other files, so any consumer edit invalidates it).
 const provenArtifactCache = new Map();
+let warnedMissingArtifactPath = false;
 const warnedArtifactPaths = new Set();
 // Long-lived processes (editor LSP, watch mode) must not keep serving a proof after a consumer
 // edit, so a passed verification only holds for a short window before the inputs are re-hashed.
@@ -146,6 +148,12 @@ module.exports = {
           provenSoloClassesPath: {
             type: 'string',
           },
+          usageAnalysis: {
+            enum: ['auto', 'artifact', 'off'],
+          },
+          projectRoot: {
+            type: 'string',
+          },
         },
         additionalProperties: false,
       },
@@ -163,7 +171,15 @@ module.exports = {
 
   create(context) {
     const options = context.options[0] || {};
-    const config = getSprinklesConfig(options);
+    const cwd = context.cwd || (typeof context.getCwd === 'function' ? context.getCwd() : process.cwd());
+    const filename = context.getFilename();
+    // lintText without a filePath has nothing on disk to analyse or to key an artifact by.
+    const containingFile = filename && !filename.startsWith('<') ? path.resolve(cwd, filename) : null;
+
+    // Discovery looks where it always has — the working directory — so an upgrade never moves the
+    // sprinkles module out from under a project that relied on auto-discovery.
+    const discoveryRoot = options.projectRoot ? path.resolve(cwd, options.projectRoot) : cwd;
+    const config = getSprinklesConfig({ ...options, projectRoot: discoveryRoot });
 
     if (!config) {
       // If no config found, skip processing
@@ -174,22 +190,43 @@ module.exports = {
 
     const sourceCode = context.getSourceCode();
 
-    // Classes the analyzer proved are only ever used standalone. Resolved lazily at the first
-    // guard hit; an unusable or stale artifact yields null, falling back to suggestion-only behavior.
+    // `auto` analyses the project in-process and caches the verdicts; `artifact` reads a file written
+    // by sprinkles-lint-analyze beforehand; `off` skips proofs entirely. A pre-existing
+    // `provenSoloClassesPath` keeps its old meaning without having to name the mode.
+    const usageAnalysisMode = options.usageAnalysis || (options.provenSoloClassesPath ? 'artifact' : 'auto');
+
+    // Classes the analyzer proved are only ever used standalone. Resolved lazily at the first guard
+    // hit; anything unusable or stale yields null, falling back to suggestion-only behavior.
     let provenSoloClassesCache;
     const resolveProvenSoloClasses = () => {
-      if (!options.provenSoloClassesPath) {
+      if (usageAnalysisMode === 'off') {
         return null;
       }
 
-      const artifactPath = path.resolve(process.cwd(), options.provenSoloClassesPath);
+      if (!containingFile) {
+        return null;
+      }
+
+      if (usageAnalysisMode === 'auto') {
+        return getProvenSoloClassesFor({ containingFile, cwd, projectRoot: options.projectRoot });
+      }
+
+      if (!options.provenSoloClassesPath) {
+        if (!warnedMissingArtifactPath) {
+          warnedMissingArtifactPath = true;
+          console.warn("[sprinkles-lint] usageAnalysis: 'artifact' needs provenSoloClassesPath — no class is treated as proven");
+        }
+        return null;
+      }
+
+      const artifactPath = path.resolve(cwd, options.provenSoloClassesPath);
       const { artifact, baseDir } = loadProvenSoloArtifact(artifactPath);
       if (!artifact) {
         return null;
       }
 
-      const absoluteFilename = path.resolve(process.cwd(), context.getFilename());
-      const relativeFilename = path.relative(baseDir || process.cwd(), absoluteFilename).split(path.sep).join('/');
+      const absoluteFilename = path.resolve(cwd, filename);
+      const relativeFilename = path.relative(baseDir || cwd, absoluteFilename).split(path.sep).join('/');
       return new Set(artifact.provenSoloClasses?.[relativeFilename] || []);
     };
     const getProvenSoloClasses = () => {

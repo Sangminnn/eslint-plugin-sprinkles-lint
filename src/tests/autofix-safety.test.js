@@ -22,7 +22,10 @@ const lint = async (code, ruleOptions = {}, { fix = true } = {}) => {
       parserOptions: { ecmaVersion: 2022, sourceType: 'module' },
       plugins: ['sprinkles-lint'],
       rules: {
-        'sprinkles-lint/no-use-style-declared-sprinkles': ['error', { configPath: './src/sprinkles.js', ...ruleOptions }],
+        'sprinkles-lint/no-use-style-declared-sprinkles': [
+          'error',
+          { configPath: './src/sprinkles.js', usageAnalysis: 'off', ...ruleOptions },
+        ],
       },
     },
     resolvePluginsRelativeTo: pluginPath,
@@ -353,7 +356,10 @@ const lintVirtual = async (code, ruleOptions, { fix = true } = {}) => {
       parserOptions: { ecmaVersion: 2022, sourceType: 'module' },
       plugins: ['sprinkles-lint'],
       rules: {
-        'sprinkles-lint/no-use-style-declared-sprinkles': ['error', { configPath: './src/sprinkles.js', ...ruleOptions }],
+        'sprinkles-lint/no-use-style-declared-sprinkles': [
+          'error',
+          { configPath: './src/sprinkles.js', usageAnalysis: 'artifact', ...ruleOptions },
+        ],
       },
     },
     resolvePluginsRelativeTo: pluginPath,
