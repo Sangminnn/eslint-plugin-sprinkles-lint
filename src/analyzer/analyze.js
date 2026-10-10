@@ -129,8 +129,14 @@ const createInstalledPackageChecker = (rootDir) => {
  * Why an unresolved specifier can be dropped from the graph without weakening the proof.
  * Returns null when it cannot — those are recorded and make the rule refuse the artifact.
  */
+// Marker modules a framework supplies at build time without them being installed: Next.js aliases
+// `server-only` and `client-only` to internal modules (next/dist/build/create-compiler-aliases.js).
+// They are bare names that never resolve to project code.
+const FRAMEWORK_PROVIDED_MODULES = new Set(['server-only', 'client-only']);
+
 const ignoredImportReason = (specifier, containingFile, { matchesTsconfigPath, isInstalledPackage }) => {
   if (isBuiltinSpecifier(specifier)) return 'node-builtin';
+  if (FRAMEWORK_PROVIDED_MODULES.has(specifier)) return 'framework-module';
   if (NON_MODULE_ASSET_PATTERN.test(specifier)) return 'non-module-asset';
   if (isRelativeSpecifier(specifier)) return null;
   if (matchesTsconfigPath(specifier)) return null;

@@ -113,10 +113,16 @@ test('U-I2. non-module asset imports are ignored, relative or aliased or through
   }
 });
 
-test('U-I3. a declared package whose resolution fails (export conditions) is ignored', () => {
-  assert.ok(!unresolvedSpecifiers.has('server-only'));
-  assert.strictEqual(ignoredReasonFor('server-only'), 'external-package');
+test('U-I3. a declared package whose resolution fails is ignored', () => {
   assert.strictEqual(ignoredReasonFor('clsx'), 'external-package');
+});
+
+test('U-I7. framework-provided marker modules are ignored even when not installed (Next aliases them)', () => {
+  assert.ok(!unresolvedSpecifiers.has('server-only'));
+  assert.strictEqual(ignoredReasonFor('server-only'), 'framework-module');
+  // client-only is neither declared in the fixture package.json nor installed
+  assert.ok(!unresolvedSpecifiers.has('client-only'));
+  assert.strictEqual(ignoredReasonFor('client-only'), 'framework-module');
 });
 
 test('U-I6. a package-shaped specifier that is not installed is a build-tool alias → recorded', () => {
