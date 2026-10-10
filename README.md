@@ -300,13 +300,32 @@ The composition hazard lives outside the linted file, so the rule alone cannot t
 "sprinkles-lint/no-use-style-declared-sprinkles": "error"
 ```
 
-In the default `auto` mode the rule runs that analysis itself, the first time a file actually needs a verdict, and keeps the verdicts in memory for the rest of the process. A verdict is only ever requested from inside the override guard, so a lint of files that never reach it costs nothing. On ~2,000 files the scan takes well under a second; afterwards a check re-walks the file list and compares mtimes (~10ms) and rescans only when something moved. Requires `typescript` >= 4.8 in the project.
+In the default `auto` mode the rule runs that analysis itself, the first time a file actually needs a verdict, and keeps the verdicts in memory for the rest of the process. A verdict is only ever requested from inside the override guard, so a lint of files that never reach it costs nothing. Requires `typescript` >= 4.8 in the project.
 
-**What gets scanned, and why it is the whole working directory.** A proof states that *no* consumer composes the class, which is only true if every consumer was looked at. The scanned tree is therefore the directory ESLint runs in — never the package the file happens to live in — even when a nested `tsconfig.json` exists (that nested config is still used to resolve `@/…`, it just does not shrink the walk). Consumers whose imports the graph cannot follow, such as another package's alias, show up as unresolved and disable proofs for the whole run rather than being quietly excluded.
+**Incremental by design.** The first scan reads every file once and keeps, per file, the small set of syntax facts the analysis needs (exports, imports, how each imported class is used) — not the source or the AST. After that, a change re-reads only the files whose mtime or size moved and re-links the graph from the stored facts. Imports are re-resolved on every re-link rather than remembered, because resolution also depends on things that are not scanned sources (a nested `package.json`'s `types`/`exports`, symlinks, `node_modules`). A change to compiler options, the root `package.json`, or the plugin, analyzer or TypeScript version starts over.
+
+The facts are also written to `node_modules/.cache/sprinkles-lint/`, so a new process — `yarn lint`, lint-staged — continues from the previous run instead of rescanning. A cache that is missing, unreadable, of another format, or structurally malformed is discarded and the scan starts over; the check is structural, the same trust as any other file in `node_modules`. Projects without a `node_modules` directory get no disk cache.
+
+| | Synthetic 2,000-file project | Real Next.js app (1,900 scanned files, 4,700 distinct imports) |
+|---|---|---|
+| First scan | ~1–2 s | ~2.4–3.7 s |
+| Re-analysis after editing one file (same process) | ~50 ms | ~0.5–0.8 s |
+| Re-analysis after adding a file (asks git again) | ~80 ms | ~0.7–0.85 s |
+| New process, one file edited, disk cache present | ~0.35 s including Node, ESLint and TypeScript start-up | not measured |
+
+On real projects a re-analysis is dominated by work that is redone on purpose rather than by parsing: expanding the tsconfig `include`, walking the tree, and re-resolving every import (resolution depends on files that are not sources, so it is never carried over).
+
+Change detection compares mtime and size, as `eslint --cache` does by default. A file whose mtime falls within two seconds of when it was read is never reused (it could still be rewritten within the same clock tick on filesystems with coarse timestamps). A tool that deliberately rewrites a file while preserving both mtime and size (`cp -p`, `rsync -t` of same-sized content) is not noticed until the file changes again.
+
+**What gets scanned.** Every source file TypeScript's tsconfig includes, plus every source file under the working directory that git does not ignore — tracked dot-directories such as `.storybook` included. Git-ignored trees (worktrees, scratch copies, build output) are skipped: they hold stale copies of the sources whose broken imports would otherwise refuse every proof. Only directories git confirms as ignored in their own right are skipped — a directory that merely contains nothing but ignored files (a lone `.DS_Store`) is still read. Ignore rules from above the scanned directory, `info/exclude`, `core.excludesFile` and every git config file git reads (including `[include]`d ones) count, and editing any of them triggers a rescan. An ignored file that scanned code imports still shows up as an unscanned import and refuses the proof. Outside a git repository, without git, or when the scanned directory is itself ignored by an enclosing repository, the whole tree is read.
+
+The trade-off: a git-ignored file that is outside the tsconfig `include`, is imported by no scanned file, and composes a class itself is not seen. That is a generated or local file acting as its own entry point; if your project has such files, include them in tsconfig.
+
+**Why the whole working directory.** A proof states that *no* consumer composes the class, which is only true if every consumer was looked at. The scanned tree is therefore the directory ESLint runs in — never the package the file happens to live in — even when a nested `tsconfig.json` exists (that nested config is still used to resolve `@/…`, it just does not shrink the walk). Consumers whose imports the graph cannot follow, such as another package's alias, show up as unresolved and disable proofs for the whole run rather than being quietly excluded.
 
 `projectRoot` narrows that tree. It is a statement by you that nothing outside it composes these classes, so use it only when that holds — for a monorepo package linted on its own, for instance.
 
-**Freshness.** A change to any scanned file, an added or deleted file, or an edit to the tsconfig chain triggers a rescan. Between checks there is a short window (half a second) in which cached verdicts are reused without re-reading the file list; a write landing inside that window from outside the lint run — a `git pull`, a code generator — is picked up on the next check rather than immediately.
+**Freshness.** A change to any scanned file, an added or deleted file, any `package.json` under the scanned tree, or an edit to the tsconfig chain triggers a rescan. Between checks there is a short window (half a second) in which cached verdicts are reused without re-reading the file list; a write landing inside that window from outside the lint run — a `git pull`, a code generator — is picked up on the next check rather than immediately.
 
 #### `artifact` mode — precomputed verdicts
 
@@ -335,6 +354,8 @@ What the analyzer cannot pin down does not stay silent either: every unresolvabl
 | Node builtins — `fs`, `node:path`, `fs/promises` | Cannot import project files |
 | Non-module assets — `.css`, `.svg`, `.png`, `.json`, … | Cannot host a vanilla-extract class. A `.css` specifier that resolves to a `.css.ts` never reaches this test: TypeScript substitutes the extension, so it stays a real graph edge |
 | Packages declared in `package.json` or present in `node_modules` — `server-only` | Resolution can fail on export conditions; the package still cannot import your css modules |
+
+`server-only` and `client-only` are also dropped (reason `framework-module`): Next.js aliases them to internal modules at build time, so they are commonly imported without being installed.
 
 Everything else is recorded as unresolved and refuses the artifact: a failed relative path, a specifier matching a declared tsconfig `paths` pattern, a name that cannot be an npm package (`@/foo`, `~/foo`, `#foo`), and a package-shaped specifier that is not actually installed — that last one is how an undeclared `@components/*` alias or a `baseUrl`-relative import such as `components/Foo` is caught.
 

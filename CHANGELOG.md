@@ -1,5 +1,21 @@
 # Changelog
 
+## 2.20.0
+
+### Changed
+
+- Usage analysis is incremental. The analyzer is split into a per-file extraction (syntax only: exports, imports, how each imported binding is used) and a project-wide link step. A rescan re-reads only files whose mtime or size changed and re-links the graph from stored facts, re-resolving imports each time (resolution also depends on nested `package.json` files, symlinks and `node_modules`, so it is never carried over). A change to compiler options, the root `package.json`, or the plugin, analyzer or TypeScript version starts from scratch. Files modified within two seconds of being read are never reused. A re-analysis after one edit drops from ~1.8 s to ~50 ms on a synthetic 2,000-file project, and from ~2.4–3.7 s to ~0.5–0.8 s on a real Next.js app (~0.7–0.85 s when a file was added), where re-resolving imports and re-expanding the tsconfig `include` dominate.
+- Per-file facts persist in `node_modules/.cache/sprinkles-lint/`, so a new `eslint` process continues from the previous run. Missing, unparseable, foreign-format or structurally malformed caches are discarded and trigger a full scan.
+- The import resolution step uses TypeScript's module resolution cache (that step alone is >10× faster; overall full-scan time is dominated by parsing and changes little).
+- Files git ignores are no longer scanned. Since 2.18.0 the analyzer walked the whole working directory, so a repository holding git worktrees or scratch copies under ignored paths had those stale copies read as consumers; their broken imports refused every proof (one Next.js app: 1,247 unresolved imports from `.worktrees/` and `.scratch/`, 9,831 files scanned instead of 1,900). The scanned set is now the tsconfig file set plus everything git does not ignore; tracked dot-directories such as `.storybook` still count, and an ignored file imported by scanned code still refuses the proof as an unscanned import. Only directories git confirms as ignored in their own right are skipped (a directory that holds nothing but ignored files is still read), and ignore rules from outside the scanned directory — parent `.gitignore` files, `info/exclude`, `core.excludesFile`, git config — are part of change detection. Git is asked only when the file set or one of those files changes. The tsconfig `include` is expanded once per re-analysis, and the tree is walked once unless the new ignore list ignores less than the previous one.
+- `server-only` and `client-only` are dropped as framework-provided modules. Next.js aliases them to internal modules at build time, so they are routinely imported without being installed, which used to refuse every proof.
+- The in-process freshness check also watches every `package.json` under the scanned tree. Before, switching a nested package's `types`/`exports` without touching a source left a long-lived process (editor ESLint server, watch mode) on the old verdicts until some source changed.
+- `src/analyzer/usage-cache.js` no longer contains raw NUL characters (a 2.19.0 authoring slip; behavior was unaffected).
+
+### Notes
+
+- A differential test mutates a project step by step — edits, additions, deletions, an export rename, a nested `package.json` switching the module a directory import resolves to, an edit that preserves mtime, and a tsconfig change — and asserts after each step that the incremental result equals a fresh scan. During development the refactored engine was also compared with the 2.19.0 engine on the test projects and produced identical artifacts.
+
 ## 2.19.0
 
 `"sprinkles-lint/no-use-style-declared-sprinkles": "error"` is now a complete configuration.
