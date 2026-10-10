@@ -266,6 +266,27 @@ test('V-8. an existing provenSoloClassesPath config still selects artifact mode'
   assert.ok(result.output.includes(`minHeight: '100vh'`));
 });
 
+test('V-pkg. a nested package.json switch is seen by a long-lived process without any source edit', async () => {
+  clearUsageCache();
+  const guarded = `${SPRINKLES_IMPORT}\nimport { style } from '@vanilla-extract/css';\n\nexport const card = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);\n`;
+  const root = writeProject({
+    'src/ui/a.css.ts': guarded,
+    'src/ui/b.css.ts': guarded,
+    'src/ui/package.json': JSON.stringify({ types: './a.css.ts' }),
+    'src/ui-page.tsx': `import { card } from './ui';\nimport { Button } from '@/Button';\n\nexport const UiPage = () => <Button className={card} />;\n`,
+  });
+  assert.notStrictEqual((await lintProject(root, {}, { target: 'src/ui/b.css.ts' })).output, undefined, 'b is unused at first');
+
+  const manifest = path.join(root, 'src/ui/package.json');
+  fs.writeFileSync(manifest, JSON.stringify({ types: './b.css.ts' }));
+  const later = new Date(Date.now() + 5_000);
+  fs.utimesSync(manifest, later, later);
+  expireUsageCacheTimers();
+
+  const result = await lintProject(root, {}, { target: 'src/ui/b.css.ts' });
+  assert.strictEqual(result.output, undefined, 'b is now composed onto <Button> and must not be hoisted');
+});
+
 test('V-TTL. within the freshness window the cached verdicts are reused (documented trade-off)', async () => {
   clearUsageCache();
   const root = writeProject();

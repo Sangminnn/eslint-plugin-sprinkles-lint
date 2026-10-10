@@ -10,12 +10,13 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { analyzeProject, isSignatureStale, getScanCount } = require('../analyzer/analyze');
+const { analyzeProjectIncremental, isSignatureStale, getScanCount, getExtractCount } = require('../analyzer/analyze');
 
 const CSS_MODULE_COUNT = 400;
 const CONSUMER_COUNT = 1_600;
 const FIRST_SCAN_BUDGET_MS = 5_000;
 const CACHED_SWEEP_BUDGET_MS = 100;
+const INCREMENTAL_BUDGET_MS = 300;
 
 const buildProject = () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'sprinkles-perf-'));
@@ -44,6 +45,12 @@ const buildProject = () => {
       `import * as st from '@/style/s${moduleIndex}.css';\nexport const C${index} = () => <div className={st.box${moduleIndex}}>{${index}}</div>;\n`,
     );
   }
+  // Freshly written files sit inside the racy window and are re-read on purpose; age them so the
+  // incremental budget measures what a real edit costs.
+  const past = new Date(Date.now() - 10_000_000);
+  for (const directory of ['src/style', 'src/comp']) {
+    for (const fileName of fs.readdirSync(path.join(root, directory))) fs.utimesSync(path.join(root, directory, fileName), past, past);
+  }
   return root;
 };
 
@@ -71,7 +78,8 @@ const run = () => {
     }
   };
 
-  const scan = measure('first scan', () => analyzeProject({ rootDir: root, collectFileHashes: false }));
+  const firstRun = measure('first scan', () => analyzeProjectIncremental({ rootDir: root, collectFileHashes: false }));
+  const scan = { value: firstRun.value.artifact, elapsedMs: firstRun.elapsedMs };
   check(
     `first scan of ${fileCount} files stays under ${FIRST_SCAN_BUDGET_MS}ms`,
     scan.elapsedMs < FIRST_SCAN_BUDGET_MS,
@@ -91,9 +99,23 @@ const run = () => {
 
   const scansBefore = getScanCount();
   fs.writeFileSync(path.join(root, 'src/comp/late.tsx'), `export const Late = () => <i />;\n`);
+  fs.utimesSync(path.join(root, 'src/comp/late.tsx'), new Date(Date.now() - 9_000_000), new Date(Date.now() - 9_000_000));
   const afterAdd = measure('sweep after adding a file', () => isSignatureStale(scan.value.signature, { rootDir: root }));
   check('adding a file is detected by the sweep', afterAdd.value === true, 'a new consumer went unnoticed');
   check('sweeping never triggers a scan by itself', getScanCount() === scansBefore, 'the sweep must stay read-only');
+
+  // One consumer edited: only that file may be re-read, and re-linking the whole graph stays cheap.
+  const editedFile = path.join(root, 'src/comp/c7.tsx');
+  fs.appendFileSync(editedFile, '// edited\n');
+  const later = new Date(Date.now() - 8_000_000);
+  fs.utimesSync(editedFile, later, later);
+  const extractsBefore = getExtractCount();
+  const incremental = measure('re-analysis after one edit', () =>
+    analyzeProjectIncremental({ rootDir: root, collectFileHashes: false }, firstRun.value.state),
+  );
+  check(`re-analysis after one edit stays under ${INCREMENTAL_BUDGET_MS}ms`, incremental.elapsedMs < INCREMENTAL_BUDGET_MS, `took ${incremental.elapsedMs.toFixed(0)}ms`);
+  // late.tsx (added by the sweep check above) and the edited consumer — nothing else.
+  check('only the added and the edited file are re-read', getExtractCount() - extractsBefore === 2, `re-read ${getExtractCount() - extractsBefore} files`);
 
   fs.rmSync(root, { recursive: true, force: true });
   console.log(`\n${failed === 0 ? 'all budgets met' : `${failed} budget(s) exceeded`}`);
