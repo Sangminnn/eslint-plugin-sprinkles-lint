@@ -20,7 +20,7 @@
   ],
   "scripts": {
     "lint": "eslint .",
-    "test": "node src/tests/comprehensive.test.js && node src/tests/flex-conversion.test.js && node src/tests/autofix-safety.test.js && node src/tests/analyzer.test.js && node src/tests/auto-mode.test.js && node src/tests/incremental.test.js && node src/tests/disk-cache.test.js && node src/tests/gitignore.test.js && node src/tests/perf-guard.test.js",
+    "test": "node src/tests/comprehensive.test.js && node src/tests/flex-conversion.test.js && node src/tests/autofix-safety.test.js && node src/tests/analyzer.test.js && node src/tests/import-source.test.js && node src/tests/auto-mode.test.js && node src/tests/incremental.test.js && node src/tests/disk-cache.test.js && node src/tests/gitignore.test.js && node src/tests/perf-guard.test.js",
     "test:basic": "node src/tests/sprinkles-rules.test.js",
     "test:flex": "node src/tests/flex-conversion.test.js",
     "test:autofix": "node src/tests/autofix-safety.test.js",

@@ -22,9 +22,10 @@ const loadCompilerOptions = (ts, tsconfigPath) => {
 
 /** Specifiers that a `paths` entry would map onto this exact file. */
 const reverseMapThroughPaths = (compilerOptions, tsconfigDir, targetFile) => {
-  // `paths` are relative to the config that declared them, which TypeScript records as
-  // `pathsBasePath` — without it a base config reached through `extends` maps onto the wrong prefix.
-  const baseUrl = compilerOptions.pathsBasePath || compilerOptions.baseUrl || tsconfigDir;
+  // Same order as TypeScript's getPathsBasePath: `paths` resolve against `baseUrl` when one is set
+  // (already absolute, relative to the config that declared it), and only otherwise against
+  // `pathsBasePath`, the directory of the config that declared `paths`.
+  const baseUrl = compilerOptions.baseUrl || compilerOptions.pathsBasePath || tsconfigDir;
   const target = toPosix(stripModuleExtension(path.resolve(targetFile)));
   const candidates = new Set();
 
