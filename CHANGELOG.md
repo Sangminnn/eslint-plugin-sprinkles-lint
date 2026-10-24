@@ -1,5 +1,11 @@
 # Changelog
 
+## 2.20.1
+
+### Fixed
+
+- The `sprinklesImportSource` derivation resolved tsconfig `paths` against the wrong base directory when `baseUrl` is set to something other than the tsconfig's own folder (e.g. `"baseUrl": "src"` with `"@/*": ["*"]`, a common Next.js layout). It produced an unresolvable specifier (`@/src/styles/sprinkles.css`), the round-trip check rejected it, and every fix that needed to add the `sprinkles` import was withheld. The base is now chosen as TypeScript does (`baseUrl` when set, otherwise the directory of the config that declared `paths`). No wrong import was ever written; the failure only withheld fixes. Introduced in 2.19.0.
+
 ## 2.20.0
 
 ### Changed
