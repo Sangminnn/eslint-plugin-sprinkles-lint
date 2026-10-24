@@ -13,7 +13,7 @@ const isSelector = (propName) => {
 };
 
 const hasSelectors = (properties) => {
-  return properties.some((prop) => isSelector(prop.key.name || prop.key.value));
+  return properties.some((prop) => prop.type === 'Property' && isSelector(String(prop.key.name ?? prop.key.value)));
 };
 
 const checkDefinedValueInSprinkles = ({ sprinklesConfig, shorthands, propName, value }) => {

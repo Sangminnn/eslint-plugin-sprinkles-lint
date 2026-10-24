@@ -121,9 +121,11 @@ try {
       ...test,
       options: [{ configPath }]
     })),
+    // Bare style() calls carry no usage proof; the allowlist lets these transformation cases take
+    // the --fix path they are here to check.
     invalid: invalidTestCases.map(test => ({
       ...test,
-      options: [{ configPath }]
+      options: [{ configPath, hoistableOverrideProperties: ['color', 'fontWeight'] }]
     }))
   };
   

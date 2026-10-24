@@ -15,6 +15,9 @@ const mockConfig = {
       'gray-900': '#2D2D2D',
     },
   },
+  // These cases check the value conversion, not usage: the allowlist lets the unproven standalone
+  // style() calls take the --fix path.
+  hoistableOverrideProperties: ['flex', 'display', 'color'],
 };
 
 const ruleTester = new RuleTester({

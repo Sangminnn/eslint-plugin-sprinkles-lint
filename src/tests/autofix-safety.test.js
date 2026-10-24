@@ -43,9 +43,12 @@ const cases = [];
 const test = (name, run) => cases.push({ name, run });
 
 // --- Fix 1: never emit sprinkles(...) into a file that does not import it ---
+// These cases are about the import, not about usage: the allowlist marks the moved properties as
+// never set by another class, so the standalone hoist is allowed without a usage proof.
+const IMPORT_CASE = { hoistableOverrideProperties: ['width', 'display'] };
 
 test('T1. no sprinkles import → report only, no fix', async () => {
-  const result = await lint(`const box = style({ width: 'auto' });`);
+  const result = await lint(`const box = style({ width: 'auto' });`, IMPORT_CASE);
 
   assert.strictEqual(result.messages.length, 1);
   assert.strictEqual(result.messages[0].messageId, 'useSprinkles');
@@ -53,7 +56,7 @@ test('T1. no sprinkles import → report only, no fix', async () => {
 });
 
 test('T1-control. sprinkles import present → fix is applied', async () => {
-  const result = await lint(`${SPRINKLES_IMPORT}\nconst box = style({ width: 'auto' });`);
+  const result = await lint(`${SPRINKLES_IMPORT}\nconst box = style({ width: 'auto' });`, IMPORT_CASE);
 
   assert.strictEqual(result.messages.length, 0, 'fixed problems should be gone');
   assert.ok(result.output.includes(`sprinkles({`));
@@ -62,7 +65,7 @@ test('T1-control. sprinkles import present → fix is applied', async () => {
 });
 
 test('T2. sprinklesImportSource set and no import → import is inserted with the fix', async () => {
-  const result = await lint(`const box = style({ width: 'auto' });`, { sprinklesImportSource: '@/styles/sprinkles.css' });
+  const result = await lint(`const box = style({ width: 'auto' });`, { ...IMPORT_CASE, sprinklesImportSource: '@/styles/sprinkles.css' });
 
   assert.strictEqual(result.messages.length, 0);
   assert.ok(result.output.startsWith(SPRINKLES_IMPORT), `output should start with the import, got:\n${result.output}`);
@@ -72,7 +75,7 @@ test('T2. sprinklesImportSource set and no import → import is inserted with th
 test('T2-multi. several reports in one file → import inserted exactly once', async () => {
   const result = await lint(
     `const a = style({ width: 'auto' });\nconst b = style({ display: 'flex' });`,
-    { sprinklesImportSource: '@/styles/sprinkles.css' },
+    { ...IMPORT_CASE, sprinklesImportSource: '@/styles/sprinkles.css' },
   );
 
   assert.strictEqual(result.messages.length, 0);
@@ -82,6 +85,7 @@ test('T2-multi. several reports in one file → import inserted exactly once', a
 
 test('T3. import already present → no duplicate import', async () => {
   const result = await lint(`${SPRINKLES_IMPORT}\nconst box = style({ width: 'auto' });`, {
+    ...IMPORT_CASE,
     sprinklesImportSource: '@/styles/sprinkles.css',
   });
 
@@ -174,6 +178,7 @@ const box = style([base, sprinkles({ color: 'notInConfig' })]);`);
 
 test('T12. sprinkles import declared below the call (hoisted) → no duplicate import', async () => {
   const result = await lint(`const box = style({ width: 'auto' });\n${SPRINKLES_IMPORT}`, {
+    ...IMPORT_CASE,
     sprinklesImportSource: '@/styles/sprinkles.css',
   });
 
@@ -182,6 +187,7 @@ test('T12. sprinkles import declared below the call (hoisted) → no duplicate i
 
 test('T13. directive prologue stays first when the import is inserted', async () => {
   const result = await lint(`'use client';\nconst box = style({ width: 'auto' });`, {
+    ...IMPORT_CASE,
     sprinklesImportSource: '@/styles/sprinkles.css',
   });
 
@@ -226,7 +232,7 @@ const removeButton = style([
 
 test('S5 (brief T11). applying the suggestion also inserts the import when sprinklesImportSource is set', async () => {
   const code = `const container = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
-  const result = await lint(code, { sprinklesImportSource: '@/styles/sprinkles.css' }, { fix: false });
+  const result = await lint(code, { ...IMPORT_CASE, sprinklesImportSource: '@/styles/sprinkles.css' }, { fix: false });
 
   assert.strictEqual(result.messages[0].suggestions.length, 1);
   const applied = applySuggestion(code, result.messages[0].suggestions[0]);
@@ -299,27 +305,61 @@ const assertReportOnly = async (code, allowlist) => {
   assert.strictEqual(fixed.messages[0].suggestions, undefined, 'must not offer a lossy suggestion');
 };
 
-test('S6. same property on both sides → the override value would be dropped → report only', async () => {
-  await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ width: '100%' }), { width: 'auto' }]);`, ['width']);
+test('S6. same property on both sides → the style value is an override of the atom → left alone', async () => {
+  const code = `${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ width: '100%' }), { width: 'auto' }]);`;
+  const result = await lint(code, { hoistableOverrideProperties: ['width'] });
+
+  assert.strictEqual(result.output, undefined, 'the override must stay a style rule');
+  assert.deepStrictEqual(result.messages, []);
 });
 
 test('S7. spread inside sprinkles() → template would collapse → report only', async () => {
   await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ ...base, display: 'flex' }), { minHeight: '100vh' }]);`, ['minHeight']);
 });
 
-test('S8. more than one override object → later objects would be dropped → report only', async () => {
-  await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }, { zIndex: 3 }]);`, ['minHeight']);
+test('S8. more than one override object → merged without losing any of them', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }, { zIndex: 3 }]);`, {
+    hoistableOverrideProperties: ['minHeight'],
+  });
+  assert.ok(/sprinkles\(\{\s*display: 'flex',\s*minHeight: '100vh'\s*\}\)/.test(result.output), result.output);
+  assert.ok(/zIndex: 3/.test(result.output), result.output);
 });
 
-test('S9. external variables in the array survive both the suggestion and the allowlist fix', async () => {
-  const code = `${SPRINKLES_IMPORT}\nconst b = style([typography, sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
+test('S8-b. the same name in two override objects → never merged (the merge keeps the first)', async () => {
+  await assertReportOnly(`${SPRINKLES_IMPORT}\nconst b = style([sprinkles({ display: 'flex' }), { minHeight: '100vh' }, { minHeight: 'auto' }]);`, ['minHeight']);
+});
+
+test('S8-c. existing sprinkles() values never move out, conditional or not', async () => {
+  const conditional = await lint(`${SPRINKLES_IMPORT}\nexport const x = style([sprinkles({ display: { mobile: 'none' } }), { width: 'auto' }]);`, { hoistableOverrideProperties: ['width'] });
+  assert.ok(/sprinkles\(\{\s*display: \{ mobile: 'none' \},\s*width: 'auto'\s*\}\)/.test(conditional.output), conditional.output);
+
+  const token = await lint(`${SPRINKLES_IMPORT}\nconst p = style({ display: 'grid' });\nexport const x = style([p, sprinkles({ display: tokens.d }), { width: 'auto' }]);`, { hoistableOverrideProperties: ['width'] });
+  assert.ok(/sprinkles\(\{\s*display: tokens\.d,\s*width: 'auto'\s*\}\)/.test(token.output), token.output);
+});
+
+test('S9. variables in the array survive both the suggestion and the allowlist fix', async () => {
+  const code = `${SPRINKLES_IMPORT}\nconst typography = style({ fontSize: 16 });\nconst b = style([typography, sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
 
   const reported = await lint(code, {}, { fix: false });
-  const applied = applySuggestion(code, reported.messages[0].suggestions[0]);
-  assert.strictEqual(collapseWhitespace(applied), collapseWhitespace(`${SPRINKLES_IMPORT}\nconst b = style([ typography, sprinkles({ display: 'flex', minHeight: '100vh' }) ]);`));
+  const guarded = reported.messages.find((message) => message.messageId === 'manualSeparationRequired');
+  const applied = applySuggestion(code, guarded.suggestions[0]);
+  assert.ok(
+    collapseWhitespace(applied).endsWith(collapseWhitespace(`const b = style([ typography, sprinkles({ display: 'flex', minHeight: '100vh' }) ]);`)),
+    applied,
+  );
 
+  const fixed = await lint(code, { hoistableOverrideProperties: ['minHeight', 'fontSize'] });
+  assert.ok(collapseWhitespace(fixed.output).includes(`const b = style([ typography, sprinkles({ display: 'flex', minHeight: '100vh' }) ]);`), fixed.output);
+});
+
+test('S9-b. a composed class the rule cannot read keeps the allowlist from applying (suggestion only)', async () => {
+  const code = `${SPRINKLES_IMPORT}\nimport { typography } from './typography.css';\nconst b = style([typography, sprinkles({ display: 'flex' }), { minHeight: '100vh' }]);`;
   const fixed = await lint(code, { hoistableOverrideProperties: ['minHeight'] });
-  assert.strictEqual(collapseWhitespace(fixed.output), collapseWhitespace(applied));
+  assert.strictEqual(fixed.output, undefined, 'typography may set minHeight; the override stays a style rule');
+
+  const reported = await lint(code, { hoistableOverrideProperties: ['minHeight'] }, { fix: false });
+  assert.strictEqual(reported.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(reported.messages[0].suggestions.length, 1);
 });
 
 // --- provenSoloClassesPath: analyzer-proven solo classes take the real --fix path ---
@@ -477,8 +517,8 @@ export const container = style([sprinkles({ width: '100%' }), { width: 'auto' }]
   const artifactPath = writeArtifact(provenArtifact());
   const result = await lintVirtual(code, { provenSoloClassesPath: artifactPath });
 
-  assert.strictEqual(result.output, undefined, 'duplicate-property merge loss is independent of solo usage');
-  assert.strictEqual(result.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(result.output, undefined, 'an override of the composed atom stays put, proven or not');
+  assert.deepStrictEqual(result.messages, []);
 });
 
 // --- Fix 3: the message only names props that are about to move into sprinkles() ---
@@ -516,6 +556,193 @@ const variants = styleVariants({
 });
 
 // --- runner ---
+
+// --- Hoist guard: shapes and inputs the guard must survive (review of the composed-override fix) ---
+
+test('G1. nested array next to sprinkles() → template would drop it → no fix, no suggestion', async () => {
+  const code = `${SPRINKLES_IMPORT}\nconst x = style({ color: 'red' });\nconst base = style([[x], sprinkles({ display: 'flex' }), { textAlign: 'center' }]);`;
+  const result = await lint(code, { hoistableOverrideProperties: ['textAlign'] });
+  assert.strictEqual(result.output, undefined, 'the nested array must survive');
+
+  const reported = await lint(code, { hoistableOverrideProperties: ['textAlign'] }, { fix: false });
+  const guarded = reported.messages.find((message) => message.messageId === 'manualSeparationRequired');
+  assert.ok(guarded && guarded.suggestions === undefined);
+});
+
+test('G2. spread next to sprinkles() → no fix even when allowlisted', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nconst b = style([...rest, sprinkles({ display: 'flex' }), { textAlign: 'center' }]);`, {
+    hoistableOverrideProperties: ['textAlign'],
+  });
+  assert.strictEqual(result.output, undefined);
+});
+
+test('G3. longhand next to a shorthand that stays in style → stays too (order inside one object)', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nconst a = style({ margin: '0 auto', marginRight: 0 });`, { hoistableOverrideProperties: ['marginRight'] });
+  assert.strictEqual(result.output, undefined, 'marginRight as an atom would lose to margin');
+});
+
+test('G4. logical property in the parent covers the physical one in the override', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}\nconst base = style({ insetInlineStart: 4 });\nconst c = style([base, sprinkles({ display: 'flex' }), { left: 0 }]);`,
+    { hoistableOverrideProperties: ['left'] },
+  );
+  assert.strictEqual(result.output, undefined);
+});
+
+test("G5. a bare '&' selector competes like the top level", async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}\nconst base = style({ selectors: { '&': { textAlign: 'left' } } });\nconst c = style([base, sprinkles({ display: 'flex' }), { textAlign: 'center' }]);`,
+    { hoistableOverrideProperties: ['textAlign'] },
+  );
+  assert.strictEqual(result.output, undefined);
+});
+
+test('G6. numeric and Object.prototype keys, array holes and object spreads do not crash the rule', async () => {
+  const inputs = [
+    `const base = style({ 1: 'x', constructor: 'y' });\nexport const c = style([base, { textAlign: 'center' }]);`,
+    `const c = style([, { textAlign: 'center' }]);`,
+    `const c = style([base, { ...x, textAlign: 'center' }]);`,
+  ];
+  for (const input of inputs) {
+    const result = await lint(`${SPRINKLES_IMPORT}\n${input}`, {}, { fix: false });
+    assert.ok(!result.messages.some((message) => message.fatal || /Error/.test(message.message)), `${input}\n${JSON.stringify(result.messages)}`);
+  }
+});
+
+// --- recipe() and styleVariants(): the same guard inside the call ---
+
+test('R1. recipe variant overriding base keeps the override as a style rule', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nexport const card = recipe({\n  base: { cursor: 'grab' },\n  variants: { disabled: { true: { cursor: 'default' } } },\n});`);
+  assert.strictEqual(result.output, undefined, 'the variant would lose to base once it is an atom');
+  assert.deepStrictEqual(result.messages, []);
+});
+
+test('R2. two variant groups setting the same property are left as they are', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}\nexport const button = recipe({\n  variants: {\n    align: { start: { textAlign: 'left' } },\n    emphasis: { strong: { textAlign: 'center', display: 'flex' } },\n  },\n});`,
+  );
+  assert.ok(result.output.includes(`align: { start: { textAlign: 'left' } }`), result.output);
+  assert.ok(/strong: \[\s*sprinkles\(\{\s*display: 'flex'\s*\}\),\s*\{\s*textAlign: 'center'\s*\}\s*\]/.test(result.output), result.output);
+});
+
+test('R3. recipe variant without overlap is still fixed', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nexport const card = recipe({\n  base: { cursor: 'grab' },\n  variants: { tone: { center: { textAlign: 'center' } } },\n});`);
+  assert.ok(result.output && result.output.includes(`center: sprinkles({`), result.output);
+});
+
+test('R4. styleVariants array: the override of a same-file class stays a style rule', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}\nconst base = style({ textAlign: 'left' });\nexport const tone = styleVariants({ center: [base, { textAlign: 'center' }] });`,
+  );
+  assert.ok(!result.output || result.output.includes(`center: [base, { textAlign: 'center' }]`), result.output);
+  assert.ok(!result.messages.some((message) => message.line === 3));
+});
+
+test('R5. styleVariants array next to a class the rule cannot read → suggestion only', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nexport const tone = styleVariants({ center: [importedBase, { textAlign: 'center' }] });`);
+  assert.strictEqual(result.output, undefined);
+
+  const reported = await lint(`${SPRINKLES_IMPORT}\nexport const tone = styleVariants({ center: [importedBase, { textAlign: 'center' }] });`, {}, { fix: false });
+  assert.strictEqual(reported.messages[0].messageId, 'manualSeparationRequired');
+  assert.strictEqual(reported.messages[0].suggestions.length, 1);
+});
+
+test('R6. a known overlap stays out of the suggestion even when another composed class is unreadable', async () => {
+  const code = `${SPRINKLES_IMPORT}\nconst localBase = style({ textAlign: 'left' });\nconst c = style([importedBase, localBase, sprinkles({ display: 'flex' }), { textAlign: 'center', width: 'auto' }]);`;
+  const reported = await lint(code, {}, { fix: false });
+  const guarded = reported.messages.find((message) => message.messageId === 'manualSeparationRequired');
+  const applied = applySuggestion(code, guarded.suggestions[0]);
+  assert.ok(/sprinkles\(\{\s*display: 'flex',\s*width: 'auto'\s*\}\)/.test(applied), applied);
+  assert.ok(/\{\s*textAlign: 'center'\s*\}/.test(applied), applied);
+});
+
+test('R7. recipe variant with a selector keeps the selector block intact', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}\nexport const link = recipe({\n  variants: { tone: { muted: { display: 'flex', ':hover': { textAlign: 'center' } } } },\n});`,
+  );
+  assert.ok(result.output && /':hover': \{\s*textAlign: 'center'\s*\}|':hover': \{\s*"textAlign": "center"\s*\}|':hover': \{ textAlign: 'center' \}/.test(result.output), result.output);
+  assert.ok(!/':hover': sprinkles/.test(result.output), result.output);
+});
+
+test('R8. a variant array declaring a name twice is never merged by --fix (the merge keeps the first)', async () => {
+  const result = await lint(
+    `${SPRINKLES_IMPORT}\nexport const box = recipe({\n  variants: { size: { sm: [sprinkles({ display: 'flex' }), { width: 'auto' }, { width: '100%' }] } },\n});`,
+  );
+  assert.strictEqual(result.output, undefined);
+});
+
+test('R9. properties already in sprinkles() never move out (a conditional value is not a style rule)', async () => {
+  const unchanged = await lint(`${SPRINKLES_IMPORT}\nexport const box = recipe({\n  variants: { t: { a: [sprinkles({ display: { mobile: 'none', desktop: 'flex' } }), { width: '50%' }] } },\n});`);
+  assert.strictEqual(unchanged.output, undefined);
+  assert.deepStrictEqual(unchanged.messages, []);
+
+  const moved = await lint(`${SPRINKLES_IMPORT}\nexport const box = recipe({\n  variants: { t: { a: [sprinkles({ display: { mobile: 'none', desktop: 'flex' } }), { width: 'auto' }] } },\n});`);
+  assert.ok(/sprinkles\(\{\s*display: \{ mobile: 'none', desktop: 'flex' \},\s*width: 'auto'\s*\}\)/.test(moved.output), moved.output);
+});
+
+test('R10. variant groups, options or recipe options the rule cannot read block --fix', async () => {
+  const inputs = [
+    `variants: { size: sizes, tone: { a: { display: 'flex' } } }`,
+    `variants: { ...shared, tone: { a: { display: 'flex' } } }`,
+    `variants: { size: { ...sizeOptions }, tone: { a: { display: 'flex' } } }`,
+  ];
+  for (const variants of inputs) {
+    const result = await lint(`${SPRINKLES_IMPORT}\nexport const box = recipe({\n  ${variants},\n});`);
+    assert.strictEqual(result.output, undefined, variants);
+  }
+  const spreadOptions = await lint(`${SPRINKLES_IMPORT}\nexport const box = recipe({\n  ...shared,\n  variants: { tone: { a: { display: 'flex' } } },\n});`);
+  assert.strictEqual(spreadOptions.output, undefined);
+});
+
+test('R11. base keeps what a non-inline variant value also sets (that value is declared before base)', async () => {
+  const inputs = [
+    `const primary = style({ color: 'red' });\nexport const box = recipe({ base: { color: 'gray-800' }, variants: { tone: { primary } } });`,
+    `export const box = recipe({ base: { display: 'flex' }, variants: { hidden: { yes: sprinkles({ display: 'none' }) } } });`,
+    `export const box = recipe({ base: { display: 'flex' }, compoundVariants: [{ variants: {}, style: sprinkles({ display: 'none' }) }] });`,
+  ];
+  for (const input of inputs) {
+    const result = await lint(`${SPRINKLES_IMPORT}\n${input}`);
+    assert.strictEqual(result.output, undefined, input);
+  }
+});
+
+test('R12. a name declared on both sides of a variant array is left alone without an empty report', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nexport const box = recipe({ base: [sprinkles({ display: 'flex' }), { display: 'grid' }] });`);
+  assert.strictEqual(result.output, undefined);
+  assert.deepStrictEqual(result.messages, []);
+});
+
+test('R13. style() as a variant value is checked once, against base, and keeps its wrapper', async () => {
+  const code = `${SPRINKLES_IMPORT}\nexport const box = recipe({\n  base: { display: 'grid' },\n  variants: { t: { a: style({ display: 'flex', width: 'auto' }) } },\n});`;
+  const reported = await lint(code, {}, { fix: false });
+  assert.strictEqual(reported.messages.length, 1, JSON.stringify(reported.messages));
+
+  const result = await lint(code);
+  assert.ok(/a: style\(\[\s*sprinkles\(\{\s*width: 'auto'\s*\}\),\s*\{\s*display: 'flex'\s*\}\s*\]\)/.test(result.output), result.output);
+});
+
+test('R14. style([sprinkles(...)]) as base is unwrapped once', async () => {
+  const code = `${SPRINKLES_IMPORT}\nexport const box = recipe({ base: style([sprinkles({ display: 'flex' })]) });`;
+  const reported = await lint(code, {}, { fix: false });
+  assert.strictEqual(reported.messages.length, 1);
+  assert.strictEqual(reported.messages[0].messageId, 'removeStyle');
+
+  const result = await lint(code);
+  assert.ok(result.output.includes(`base: sprinkles({ display: 'flex' })`), result.output);
+});
+
+test('R15. styleVariants mapper written as a function expression is checked', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nexport const tone = styleVariants(map, function () { return { display: 'flex' }; });`, {}, { fix: false });
+  assert.strictEqual(result.messages.length, 1);
+});
+
+test('S8-d. a movable property in a later override object is still found', async () => {
+  const result = await lint(`${SPRINKLES_IMPORT}\nexport const x = style([sprinkles({ cursor: 'pointer' }), { margin: v }, { marginRight: 0, width: 'auto' }]);`, {
+    hoistableOverrideProperties: ['width', 'marginRight'],
+  });
+  assert.ok(/sprinkles\(\{\s*cursor: 'pointer',\s*width: 'auto'\s*\}\)/.test(result.output), result.output);
+  assert.ok(/marginRight: 0/.test(result.output) && !/sprinkles\(\{[^)]*marginRight/.test(result.output), result.output);
+});
 
 const run = async () => {
   let failed = 0;
