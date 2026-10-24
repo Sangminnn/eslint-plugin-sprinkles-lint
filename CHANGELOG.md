@@ -1,5 +1,27 @@
 # Changelog
 
+## 2.21.0
+
+`--fix` no longer moves an override into `sprinkles()`. A value moved there becomes an atom early in the stylesheet, so it loses to any `style()` rule for the same property and is ordered against other atoms by the scale array alone; in 2.20.1 that changed rendered output in a real app (a `marginTop` override composed on a same-file class, and a `wordBreak` on a class passed to a component whose base sets `word-break`).
+
+### Fixed
+
+- Every `style()` autofix path goes through the same guard. Before, only `style([sprinkles(…), {…}])` checked anything; standalone `style({…})` and `style([someClass, {…}])` were rewritten unconditionally.
+- A property that a class composed in the same file also sets stays in the style object. Composed classes are read through same-file `const` declarations, arrays, `style()` and `sprinkles()` calls, CSS shorthands and logical properties (`margin` ↔ `marginTop`, `insetInlineStart` ↔ `left`), `@media`/`@supports`/`@container` blocks and `selectors: { '&': … }`. Such a property is not reported: it is a deliberate override. The same applies inside one object (`marginRight` next to a `margin` that stays) and against the `sprinkles()` call in the same array.
+- Values already inside `sprinkles()` are never moved out. A conditional value (`{ mobile, desktop }`) used to land in a style object, where it is invalid, and a token moved out could start beating the classes it used to lose to. The one remaining case is a `sprinkles()` holding nothing but literal values the config does not define, which still becomes a style object.
+- `recipe()` and `styleVariants()` are guarded too (previously listed as a known gap). A variant value keeps what `base` or any value of another variant group sets; `base` keeps what non-inline variant or compound values set (classes declared before the recipe, `sprinkles()` atoms); `styleVariants` arrays follow the `style()` rules. A recipe or variant value written as `style(…)` keeps its wrapper, since unwrapping would move it after `base`.
+- Fixes that dropped code are withheld: a nested array or spread next to the merged object, the same name in two override objects (the merge kept the first), a second override object in an array without `sprinkles()`.
+- Each recipe variant value is reported once instead of two or three times, and nested selector blocks inside variants are no longer rewritten.
+- The guard no longer crashes on numeric or `Object.prototype`-named keys, array holes or object spreads.
+
+### Changed
+
+- **Standalone `style({…})` is auto-fixed only when the class is proven to be used standalone** (or every moved property is in `hoistableOverrideProperties`). Otherwise it is reported as `unprovenUsage` with a `hoistToSprinkles` suggestion. A class referenced inside its own css.ts is never proven. Upgrading can therefore leave errors that `--fix` does not clear, wherever the analysis cannot prove a class (no tsconfig, imports it cannot follow, `usageAnalysis: 'off'`, or real composition).
+- **A composed class the rule cannot read makes the move a suggestion even when the properties are in `hoistableOverrideProperties`** — an imported class, a call result, a spread, a destructured, reassigned or `globalStyle`-extended binding, or a sprinkles shorthand whose mapping the plugin does not know. The option now speaks only for what the rule cannot see on the element (component bases). A known overlap is never moved, with or without the option.
+- Usage analysis now runs for any `style()` class with a property to move, not only inside the override guard.
+- Several override objects without a repeated name are merged by the fix instead of being reported only.
+- `styleVariants` mappers written as `function` expressions are checked.
+
 ## 2.20.1
 
 ### Fixed

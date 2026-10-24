@@ -236,7 +236,7 @@ Every option is optional — `"error"` on its own is a complete configuration.
 | `configPath` | `string` | Path to the exported sprinkles config (see STEP 1–3). Omit it to let the plugin discover `sprinkles.css.ts` itself. |
 | `sprinklesImportSource` | `string` | Module specifier used when `--fix` has to add `import { sprinkles } from '...'`. Derived from your `tsconfig` `paths` when it maps unambiguously onto the discovered sprinkles module; set it explicitly when it does not. |
 | `provenSoloClassesPath` | `string` | Artifact produced by `sprinkles-lint-analyze`; implies `usageAnalysis: 'artifact'`. |
-| `hoistableOverrideProperties` | `string[]` | Properties the project knows are never set by any composed component base. When every movable property of an override object is in this list, `--fix` hoists it into `sprinkles()`; otherwise the case is only reported with an IDE suggestion (see [Autofix safety §2](#2-override-objects-composed-with-other-classes-no-autofix-by-default)). Default `[]`. |
+| `hoistableOverrideProperties` | `string[]` | Properties the project knows are never set by any composed component base. When every movable property of an object is in this list, `--fix` hoists it into `sprinkles()` without a usage proof — as long as every composed class in the same array could be read and none of them sets the property; otherwise the case is only reported with an IDE suggestion (see [Autofix safety §2](#2-override-objects-composed-with-other-classes-no-autofix-by-default)). Default `[]`. |
 
 ```js
 "sprinkles-lint/no-use-style-declared-sprinkles": [
@@ -251,7 +251,7 @@ Every option is optional — `"error"` on its own is a complete configuration.
 
 ## Autofix safety
 
-Detection always runs. For `style(...)` calls, `--fix` is only offered when applying it keeps the file compiling and rendering the same — unless the project opts a property in via `hoistableOverrideProperties`. See the known gap below for `recipe` / `styleVariants`.
+Detection always runs. `--fix` is only offered when applying it keeps the file compiling and rendering the same. The rule rests on one cascade fact: an override must stay a `style()` rule. A local rule is emitted after the sprinkles sheet and beats an atom; once the override is itself an atom it loses to any `style()` rule for the same property, and against another atom the winner is just the order of the scale array.
 
 ### 1. `sprinkles` import
 
@@ -276,20 +276,29 @@ export const removeButton = style([
 
 **Why `--fix` skips this shape.** A local `style()` rule is emitted after the sprinkles sheet, so for normal declarations it beats an atom for the same property. Once the value is moved into `sprinkles()` it becomes an atom too: the contest is now decided by the order of the scale array, and the author has lost the only way to say "this must win". The competing class (a component base, for example) lives in another file the rule cannot see — and a file that overrides a composed class looks byte-for-byte identical to one that simply forgot to use sprinkles. So for `style([sprinkles(...), { ... }])` the rule reports `manualSeparationRequired` and, by default, leaves the code untouched.
 
-Three ways to move the property without retyping it, in the order the rule consults them:
+What the rule does about it, for `style()`, `recipe()` and `styleVariants()` alike:
+
+- **Properties something else on the element is known to set stay where they are.** The rule reads the classes composed next to the object when they are declared in the same file (`const base = style(...)`, followed through arrays, `style()` calls and `sprinkles()` calls), plus CSS shorthands (`margin` covers `marginTop`; logical properties cover both physical sides), `@media`/`@supports`/`@container` blocks and `selectors: { '&': … }`. A property that overlaps is not reported at all: it is a deliberate override. The same holds inside one object (`marginRight` next to `margin` stays) and against the `sprinkles()` call in the same array.
+- **Values already inside `sprinkles()` never move out**, so a conditional value (`{ mobile, desktop }`) or a token never becomes a style rule.
+- **When a composed class cannot be read** — imported, a call result, a spread, a destructured, reassigned or `globalStyle`-extended binding, or a sprinkles shorthand whose mapping the plugin does not know — the move is offered as a suggestion only, whatever the options say.
+- In `recipe()`, a variant value competes with `base` and with every value of every *other* group (groups apply together; values of one group never do). `base` competes with variant and compound values that are not inline objects (classes declared before the recipe, `sprinkles()` atoms). Inline variants are generated after `base` and keep winning once `base` is an atom.
+
+When nothing overlaps and every composed class could be read, three ways remain to move the property, in the order the rule consults them:
 
 - **Usage-aware proof (default)** — the rule analyses the project and hoists a class it can prove is only ever used standalone, because then no competing class shares the element. Nothing to configure. See [Usage-aware hoisting](#usage-aware-hoisting).
 
 - **IDE suggestion** — the report carries a `hoistToSprinkles` quick-fix (when the file imports `sprinkles` or `sprinklesImportSource` is set — the same precondition as `--fix`). `--fix` never applies suggestions; you check the call sites, then apply it per case from your editor.
-- **`hoistableOverrideProperties`** — if the project knows a property is never declared by any component base (`minHeight`, `objectFit`, `cursor`, …), list it in the option and `--fix` hoists it automatically. Only override objects whose *every* movable property is listed are fixed; the rest stay suggestions. The default is an empty list, so nothing moves unless the project says so.
+- **`hoistableOverrideProperties`** — if the project knows a property is never declared by any component base (`minHeight`, `objectFit`, `cursor`, …), list it in the option and `--fix` hoists it automatically. Only objects whose *every* movable property is listed are fixed; the rest stay suggestions. The list speaks for what the rule cannot see on the element (component bases); it does not override a composed class the rule can read and finds overlapping, nor make an unreadable one safe. The default is an empty list, so nothing moves unless the project says so.
 
-Neither path is offered for shapes the transformation cannot handle losslessly — more than one override object, a property declared on both sides, or a spread inside `sprinkles()`. Those are reported only.
+Neither path is offered for shapes the transformation cannot handle losslessly — the same name in two override objects, an element the template would drop (a nested array, a spread), or a spread or computed key inside `sprinkles()`. Those are reported only.
 
-**Known gap:** the same hoisting is still auto-fixed inside `recipe({ base: [...] })`, `recipe` variants and `styleVariants` arrays, and `hoistableOverrideProperties` has no effect there. Review `--fix` output in those places.
+`recipe()` and `styleVariants()` values never carry a usage proof (they are reached through calls and member access), so only the structural checks above apply to them. A recipe class passed as `className` to a component can still meet that component's base; review those call sites.
 
-### 3. Standalone `style({...})` (autofixed, verify composition)
+### 3. Standalone `style({...})` (fixed only when proven)
 
-`style({ width: 'auto' })` → `sprinkles({ width: 'auto' })` is still auto-fixed. Whether that class is later composed with another component's base class cannot be known from the file, so check call sites that pass it as `className` to a component with its own `width`.
+`style({ width: 'auto' })` meets whatever else its element gets — a component's base class, another class in `clsx()` — and nothing in the file says which. So `--fix` only rewrites it to `sprinkles({ width: 'auto' })` when the class is proven to be used standalone (or its properties are listed in `hoistableOverrideProperties`). Otherwise it is reported as `unprovenUsage` with the same `hoistToSprinkles` suggestion. A class referenced inside its own css.ts (composed into another class there) is never proven: its rules reach every element that gets the composing class.
+
+Upgrading from 2.20 or earlier can therefore leave errors that `--fix` no longer clears, wherever the analysis cannot prove a class (no tsconfig, imports it cannot follow, `usageAnalysis: 'off'`, or real composition). Apply the suggestion after checking the call sites, or list the property in `hoistableOverrideProperties`.
 
 ### Usage-aware hoisting
 
@@ -300,7 +309,7 @@ The composition hazard lives outside the linted file, so the rule alone cannot t
 "sprinkles-lint/no-use-style-declared-sprinkles": "error"
 ```
 
-In the default `auto` mode the rule runs that analysis itself, the first time a file actually needs a verdict, and keeps the verdicts in memory for the rest of the process. A verdict is only ever requested from inside the override guard, so a lint of files that never reach it costs nothing. Requires `typescript` >= 4.8 in the project.
+In the default `auto` mode the rule runs that analysis itself, the first time a file actually needs a verdict, and keeps the verdicts in memory for the rest of the process. A verdict is requested when a `style()` class has a property to move, so a lint of files where nothing would move costs nothing. Requires `typescript` >= 4.8 in the project.
 
 **Incremental by design.** The first scan reads every file once and keeps, per file, the small set of syntax facts the analysis needs (exports, imports, how each imported class is used) — not the source or the AST. After that, a change re-reads only the files whose mtime or size moved and re-links the graph from the stored facts. Imports are re-resolved on every re-link rather than remembered, because resolution also depends on things that are not scanned sources (a nested `package.json`'s `types`/`exports`, symlinks, `node_modules`). A change to compiler options, the root `package.json`, or the plugin, analyzer or TypeScript version starts over.
 
@@ -408,7 +417,7 @@ module.exports = {
 };
 ```
 
-### Case 1 - Default case (using style only)
+### Case 1 - Default case (using style only, fixed when the class is proven standalone)
 
 ```js
 // as-is
@@ -573,7 +582,7 @@ const testStyle3 = style([
   }
 ])
 
-// to-be
+// to-be (when the class is proven standalone or `color` is allowlisted; otherwise a suggestion)
 const testStyle3 = sprinkles({
   // etc ...
   color: 'gray-100' // auto transform and remove empty style object
